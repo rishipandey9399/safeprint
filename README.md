@@ -67,10 +67,16 @@ No env vars are required for local dev. To customize, copy `.env.example` to `.e
 ### Honest limitations (MVP, browser-only by design)
 
 A browser cannot stop an operator from choosing **"Save as PDF" inside the native print dialog**,
-photographing the screen, or extracting canvas pixels via devtools. Those need the out-of-scope
-Windows print agent (or a print-server integration) plus watermarking. What this MVP proves is the
-default-path guarantee: *nothing is downloaded, cached, or left on disk in the normal flow*, and
-the file provably stops existing server-side after one print or 30 minutes.
+photographing the screen, or extracting canvas pixels via devtools — the OS print dialog is not
+scriptable from a web page. The mitigation implemented here is **session-coded watermarking**:
+every canvas pixel (screen and print are the same pixels) carries a faint diagonal
+`SAFEPRINT · SP-<code>` tile plus a footer with the share code, date/time, and "single authorised
+copy — duplication prohibited". A copy that escapes via Save-as-PDF, photo, or devtools is a
+visibly marked, audit-traceable copy — near-worthless for identity fraud — not a clean original.
+Full prevention of the escape path needs the out-of-scope Windows print agent (or print-server
+integration). What this MVP proves is the default-path guarantee: *nothing is downloaded, cached,
+or left on disk in the normal flow*, and the file provably stops existing server-side after one
+print or 30 minutes.
 
 ## What's mocked vs production-ready
 
@@ -78,6 +84,7 @@ the file provably stops existing server-side after one print or 30 minutes.
 |---|---|
 | Encryption, session/OTP lifecycle, audit log, TTL cleanup | Real, working |
 | Locked viewer (PDF.js on canvas) + print flow | Real, working |
+| Session-coded watermark on every rendered/printed pixel | Real, working |
 | Local encrypted storage (`lib/storage/local.ts`) | Real — dev stand-in for GCS behind the same interface |
 | GCS storage (`lib/storage/gcs.ts`) | Written but unexercised — needs `npm i @google-cloud/storage`, creds, bucket + 1-day lifecycle rule (deletion backstop); see file header |
 | SMS/OTP delivery (`lib/otp.ts`) | Mocked — logs to console; swap in MSG91/Twilio behind `OtpProvider` |

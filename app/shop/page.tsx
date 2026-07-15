@@ -42,6 +42,7 @@ export default function ShopPortal() {
       <main className="page wide">
         <LockedViewer
           session={session}
+          shareCode={shareCode}
           onEnded={(kind, message) => {
             setOutcome({ kind, message });
             setPhase("done");

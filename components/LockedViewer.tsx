@@ -13,7 +13,51 @@ export interface VerifiedSession {
 
 interface Props {
   session: VerifiedSession;
+  /** Session share code — baked into the watermark so any copy is traceable. */
+  shareCode: string;
   onEnded: (outcome: "printed" | "ended", message: string) => void;
+}
+
+/**
+ * The native print dialog's "Save as PDF" destination cannot be removed by a
+ * web page, so instead every canvas pixel carries a session-coded watermark:
+ * a faint diagonal tile across the document plus a footer line. Whatever
+ * leaves the dialog — paper or PDF — is a marked, traceable copy rather than
+ * a clean original, and the print attempt is already in the audit log.
+ */
+function applyWatermark(canvas: HTMLCanvasElement, label: string, footer: string) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Diagonal tiled label, light enough to keep the document readable.
+  ctx.save();
+  const fontSize = Math.max(18, Math.round(w / 26));
+  ctx.font = `700 ${fontSize}px "Courier New", monospace`;
+  ctx.fillStyle = "rgba(178, 62, 29, 0.13)";
+  ctx.textAlign = "center";
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(-Math.PI / 6);
+  const stepX = ctx.measureText(label).width + fontSize * 3;
+  const stepY = fontSize * 5;
+  let row = 0;
+  for (let y = -h; y < h; y += stepY, row++) {
+    const offset = (row % 2) * (stepX / 2);
+    for (let x = -w - offset; x < w; x += stepX) {
+      ctx.fillText(label, x + offset, y);
+    }
+  }
+  ctx.restore();
+
+  // Footer strip: solid, small, inside the bottom margin.
+  ctx.save();
+  const footSize = Math.max(11, Math.round(w / 72));
+  ctx.font = `${footSize}px "Courier New", monospace`;
+  ctx.fillStyle = "rgba(38, 33, 26, 0.78)";
+  ctx.textAlign = "center";
+  ctx.fillText(footer, w / 2, h - footSize * 0.9);
+  ctx.restore();
 }
 
 /**
@@ -23,7 +67,7 @@ interface Props {
  * browser cache could capture. Right-click, copy, drag, Ctrl+S/P/C are
  * disabled while mounted.
  */
-export default function LockedViewer({ session, onEnded }: Props) {
+export default function LockedViewer({ session, shareCode, onEnded }: Props) {
   const stackRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,6 +106,12 @@ export default function LockedViewer({ session, onEnded }: Props) {
         const stack = stackRef.current;
         if (!stack) return;
 
+        const stampLabel = `SAFEPRINT · SP-${shareCode}`;
+        const stampFooter = `Printed via SafePrint · SP-${shareCode} · ${new Date().toLocaleString(
+          "en-IN",
+          { dateStyle: "medium", timeStyle: "short" }
+        )} · single authorised copy — duplication prohibited`;
+
         if (session.mimeType === "application/pdf") {
           const pdfjs = await import("pdfjs-dist");
           pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -77,6 +127,7 @@ export default function LockedViewer({ session, onEnded }: Props) {
             canvas.height = viewport.height;
             const ctx = canvas.getContext("2d")!;
             await page.render({ canvasContext: ctx, viewport }).promise;
+            applyWatermark(canvas, stampLabel, stampFooter);
             stack.appendChild(canvas);
           }
         } else {
@@ -86,6 +137,7 @@ export default function LockedViewer({ session, onEnded }: Props) {
           canvas.height = bitmap.height;
           canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
           bitmap.close();
+          applyWatermark(canvas, stampLabel, stampFooter);
           stack.appendChild(canvas);
         }
         setLoading(false);
@@ -212,6 +264,12 @@ export default function LockedViewer({ session, onEnded }: Props) {
       {notice && <p className="error">{notice}</p>}
       {loading && <p className="hint">Decrypting and rendering document…</p>}
       {error && <p className="error">{error}</p>}
+      {!loading && !error && (
+        <p className="hint" style={{ marginBottom: 12 }}>
+          Every copy that leaves the print dialog — paper or saved PDF — carries the watermark
+          SP-{shareCode} with date and time, and this session is logged.
+        </p>
+      )}
 
       <div className="canvas-stack print-area" ref={stackRef}>
         <RubberStamp className="desk-stamp" top="SAFEPRINT" bottom="DO NOT DOWNLOAD" center="VIEW" angle={-12} size={128} />
