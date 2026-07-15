@@ -1,0 +1,22 @@
+# dependencies / build
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets — never commit a real key (.env.example is the template)
+.env
+.env.local
+.env*.local
+
+# encrypted citizen documents — must never leave the machine
+.safeprint-store/
+
+# OS
+.DS_Store
+
+# tool-installed third-party skills (vendored, ~2MB) + local agent settings
+.agents/
+skills-lock.json
+.claude/settings.local.json
+.claude/skills/
