@@ -200,11 +200,22 @@ export default function DownloadPage() {
             </a>
           ))}
         </div>
-        <p className="hint">
-          Builds are currently unsigned: Windows SmartScreen shows &ldquo;unrecognized app&rdquo;
-          (choose <em>More info → Run anyway</em>) and macOS requires right-click →{" "}
-          <em>Open</em> the first time.
-        </p>
+        <details className="dl-firstrun">
+          <summary>First-run note: these builds are not yet notarized</summary>
+          <p>
+            <strong>Windows</strong> — SmartScreen shows &ldquo;unrecognized app&rdquo;. Choose{" "}
+            <em>More info → Run anyway</em>.
+          </p>
+          <p>
+            <strong>macOS</strong> — the download is blocked on first open. Open <em>Terminal</em>
+            {" "}and run, then launch the app normally:
+          </p>
+          <pre className="dl-cmd">xattr -dr com.apple.quarantine &quot;/Applications/SafePrint Agent.app&quot;</pre>
+          <p>
+            <strong>Linux</strong> — mark the AppImage executable
+            (<code>chmod +x</code>), or install the .deb with <code>sudo apt install ./…deb</code>.
+          </p>
+        </details>
       </section>
       </Reveal>
 

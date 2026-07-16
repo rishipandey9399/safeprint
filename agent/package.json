@@ -24,6 +24,7 @@
     "productName": "SafePrint Agent",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "asar": true,
+    "afterPack": "scripts/afterpack-sign.cjs",
     "files": [
       "main.js",
       "preload.cjs",
@@ -32,6 +33,7 @@
     ],
     "mac": {
       "category": "public.app-category.business",
+      "identity": null,
       "target": ["dmg", "zip"]
     },
     "win": {

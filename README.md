@@ -132,8 +132,20 @@ npm run dist                     # build installer for the current OS
 
 Cross-platform installers (dmg/zip, nsis exe, AppImage/deb) build in CI on native runners —
 push a tag like `agent-v0.1.0` or run the **Build SafePrint Agent** workflow manually; artifacts
-attach to the GitHub release. Builds are unsigned until signing identities are added as repo
-secrets.
+attach to the GitHub release.
+
+### Code signing / first-run
+
+The macOS build is **ad-hoc signed** (`scripts/afterpack-sign.cjs`, `mac.identity: null`) so the
+app bundle's resources are properly sealed — without this, an Apple Silicon Mac reports the app as
+*"damaged and can't be opened"* rather than merely unverified. It is still **not notarized**
+(that needs a paid Apple Developer ID), so first-run friction remains until real signing certs are
+added as repo secrets:
+
+- **macOS** — Gatekeeper blocks the download on first open. Clear the quarantine flag, then launch:
+  `xattr -dr com.apple.quarantine "/Applications/SafePrint Agent.app"`
+- **Windows** — SmartScreen: *More info → Run anyway* (add `CSC_LINK`/`CSC_KEY_PASSWORD` secrets to sign).
+- **Linux** — `chmod +x` the AppImage, or `sudo apt install ./…deb`.
 
 ## Project structure
 
