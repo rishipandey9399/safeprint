@@ -90,6 +90,50 @@ print or 30 minutes.
 | SMS/OTP delivery (`lib/otp.ts`) | Mocked — logs to console; swap in MSG91/Twilio behind `OtpProvider` |
 | Rate limiting | Real but in-memory (single process); move to Redis for production |
 | HTTPS | Terminate TLS at your proxy/host in production; dev is plain HTTP |
+| Desktop agent (silent physical-only printing, capture blocking) | Real, working — verified end-to-end by `npm run selftest`; installers unsigned until signing keys are added |
+
+## SafePrint Agent (desktop app — closes the Save-as-PDF hole)
+
+The browser portal cannot control the OS print dialog. The **SafePrint Agent** (`agent/`,
+Electron, one codebase for **Windows / macOS / Linux**) removes the dialog from the flow
+entirely:
+
+- **Silent, direct-to-device printing** — the job goes straight to a chosen printer's spooler
+  (`webContents.print({ silent: true, deviceName })`). The print dialog never opens, so
+  "Save as PDF" and every other virtual destination simply never exists.
+- **Physical printers only** — virtual/file printers (Microsoft Print to PDF, XPS, OneNote,
+  CUPS-PDF, PDF24, CutePDF, Foxit…) are filtered by name *and* driver-model string
+  (`agent/printer-filter.cjs`, unit-tested). The main process re-validates the chosen printer at
+  print time, so a spoofed request from the UI is rejected too.
+- **Screenshot/screen-capture blocking** — `setContentProtection(true)`: the window renders
+  black in captures and screen shares on **Windows** (`SetWindowDisplayAffinity`) and **macOS**
+  (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap, watermark still
+  applies.
+- **Token isolation** — the viewer token lives only in the Electron main process; the sandboxed
+  renderer (contextIsolation, no Node, CSP, all navigation/permissions denied) receives document
+  bytes and printer names, nothing else.
+- **Same watermark + audit** — every pixel carries `SAFEPRINT · SP-<code> · AGENT`; the server
+  logs `client: agent/<version>` in the audit trail (`X-SafePrint-Client` header), so
+  agent-verified prints are distinguishable from browser prints.
+- **Nothing on disk** — decrypted bytes exist only in memory; canvases are wiped on completion;
+  closing the window fires a best-effort session-close so the server destroys the file.
+
+Still not stoppable, agent or not: photographing the screen/paper (the watermark keeps such
+copies traceable), an admin who installs a capture driver or a virtual printer masquerading with
+a physical driver's name (the filter is a heuristic), and OS spooler artifacts (jobs are
+rasterized; direct-spool scrubbing would be a production hardening step).
+
+```bash
+cd agent && npm install          # also vendors pdf.js into renderer/
+npm start                        # run against any SafePrint server URL
+npm run selftest -- --server=http://localhost:3000 --code=ABC123 --otp=123456
+npm run dist                     # build installer for the current OS
+```
+
+Cross-platform installers (dmg/zip, nsis exe, AppImage/deb) build in CI on native runners —
+push a tag like `agent-v0.1.0` or run the **Build SafePrint Agent** workflow manually; artifacts
+attach to the GitHub release. Builds are unsigned until signing identities are added as repo
+secrets.
 
 ## Project structure
 

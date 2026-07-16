@@ -26,7 +26,10 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   session.printAttempts += 1;
   await session.save();
-  await logAudit(session._id as never, "print_attempt", ip, { attempt: session.printAttempts });
+  await logAudit(session._id as never, "print_attempt", ip, {
+    attempt: session.printAttempts,
+    client: req.headers.get("x-safeprint-client") ?? "browser",
+  });
 
   return NextResponse.json({
     attempt: session.printAttempts,

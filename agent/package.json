@@ -1,0 +1,49 @@
+{
+  "name": "safeprint-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SafePrint verified-shop print agent — dialog-free printing to physical printers only",
+  "main": "main.js",
+  "author": "SafePrint",
+  "license": "UNLICENSED",
+  "scripts": {
+    "postinstall": "node scripts/copy-vendor.cjs",
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "dist": "electron-builder --publish never"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^33.3.0",
+    "electron-builder": "^25.1.8",
+    "pdfjs-dist": "^4.10.38"
+  },
+  "build": {
+    "appId": "in.safeprint.agent",
+    "productName": "SafePrint Agent",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "printer-filter.cjs",
+      "renderer/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Office",
+      "maintainer": "SafePrint"
+    }
+  }
+}

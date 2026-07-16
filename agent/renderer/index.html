@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data:"
+    />
+    <title>SafePrint Agent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page" id="connect-screen">
+      <div class="brand"><h1>SAFEPRINT<span class="dot">.</span></h1></div>
+      <span class="formref">Form SP-3 · Verified shop agent</span>
+      <p class="tagline">
+        Prints go <strong>directly to a physical printer</strong> — the system print dialog never
+        opens, so nothing can be saved as a PDF. This window is excluded from screenshots and
+        screen sharing.
+      </p>
+      <div class="card">
+        <h2>Open a customer document</h2>
+        <label for="server">SafePrint server</label>
+        <input id="server" type="text" placeholder="https://safeprint.example.com" spellcheck="false" />
+        <label for="code">Share code</label>
+        <input id="code" type="text" maxlength="6" placeholder="e.g. K7X2MP" spellcheck="false" />
+        <label for="otp">6-digit OTP</label>
+        <input id="otp" type="text" maxlength="6" inputmode="numeric" placeholder="••••••" />
+        <button class="btn" id="verify-btn">Open document</button>
+        <p class="error" id="connect-error" hidden></p>
+        <p class="hint">
+          Wrong OTP 5 times locks the session and deletes the customer&rsquo;s file.
+        </p>
+      </div>
+    </main>
+
+    <main class="page wide" id="viewer-screen" hidden>
+      <div class="viewer-toolbar">
+        <span class="doc-name" id="doc-name"></span>
+        <span class="lock-note" id="attempts-note"></span>
+        <select id="printer-select" aria-label="Physical printer"></select>
+        <button class="btn" id="print-btn">Print</button>
+        <button class="btn secondary" id="close-btn">Close</button>
+      </div>
+      <p class="hint" id="printer-note"></p>
+      <p class="error" id="viewer-error" hidden></p>
+      <div class="canvas-stack print-area" id="stack"></div>
+    </main>
+
+    <main class="page" id="done-screen" hidden>
+      <div class="card big-result">
+        <div class="stamp" id="done-stamp"></div>
+        <h2 id="done-title"></h2>
+        <p id="done-message"></p>
+        <p class="hint">Nothing was saved on this computer.</p>
+        <button class="btn secondary" id="again-btn">Print another customer&rsquo;s document</button>
+      </div>
+    </main>
+
+    <div class="modal-backdrop" id="confirm-modal" hidden>
+      <div class="modal">
+        <h3>Did the page come out of the printer?</h3>
+        <p class="hint" id="confirm-hint"></p>
+        <div class="row">
+          <button class="btn" id="confirm-yes">Yes, printed</button>
+          <button class="btn secondary" id="confirm-no">No, it failed</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

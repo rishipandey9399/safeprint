@@ -1,0 +1,258 @@
+/* SafePrint Agent — compact port of the typed-form / rubber-stamp identity. */
+
+:root {
+  --paper: #f1e8d3;
+  --sheet: #fbf6ea;
+  --ink: #26211a;
+  --ink-soft: #6b6151;
+  --muted: #736750;
+  --stamp: #d1502a;
+  --stamp-deep: #b23e1d;
+  --stamp-press: #a8391a;
+  --rule: #d5c8ac;
+  --rule-strong: #c3b28d;
+  --radius: 4px;
+  --form: "Courier New", Courier, monospace;
+  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--body);
+  color: var(--ink);
+  background: var(--paper);
+  line-height: 1.55;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.page { max-width: 560px; margin: 0 auto; padding: 40px 18px 60px; }
+.page.wide { max-width: 1020px; }
+
+.brand h1 {
+  font-family: var(--form);
+  font-size: 1.65rem;
+  letter-spacing: 0.14em;
+}
+.brand .dot { color: var(--stamp); }
+
+.formref {
+  display: inline-block;
+  font-family: var(--form);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--stamp-deep);
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 8px;
+  margin-bottom: 18px;
+}
+
+.tagline { color: var(--ink-soft); font-size: 0.96rem; margin: 14px 0 26px; max-width: 48ch; }
+.tagline strong { color: var(--ink); }
+
+.card {
+  background: var(--sheet);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 26px 24px;
+  box-shadow: inset 0 0 0 1px #fff, 0 12px 26px rgba(38, 33, 26, 0.1);
+}
+
+.card h2 {
+  font-family: var(--form);
+  font-size: 1.02rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px dashed var(--rule);
+  padding-bottom: 12px;
+  margin-bottom: 6px;
+}
+
+label {
+  display: block;
+  font-family: var(--form);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  margin: 18px 0 7px;
+}
+
+input, select {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 1rem;
+  color: var(--ink);
+  background: #fffdf7;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  user-select: text;
+  -webkit-user-select: text;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--stamp);
+  box-shadow: 0 0 0 3px rgba(209, 80, 42, 0.2);
+}
+
+#code { text-transform: uppercase; letter-spacing: 0.2em; font-weight: 700; }
+#otp { letter-spacing: 0.35em; font-weight: 700; }
+
+.btn {
+  display: inline-block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 20px;
+  padding: 13px 20px;
+  font-family: var(--form);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--stamp-deep);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  box-shadow: 0 3px 0 var(--stamp-press);
+}
+.btn:hover:not(:disabled) { background: var(--stamp-press); }
+.btn:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+.btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+.btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.btn.secondary {
+  color: var(--ink);
+  background: transparent;
+  border: 1.5px solid var(--ink);
+  box-shadow: none;
+}
+
+.error { color: var(--stamp-deep); font-size: 0.92rem; font-weight: 600; margin-top: 12px; }
+.hint { color: var(--ink-soft); font-size: 0.88rem; margin-top: 12px; }
+
+.viewer-toolbar {
+  position: sticky;
+  top: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--sheet);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 0 0 1px #fff, 0 12px 26px rgba(38, 33, 26, 0.1);
+}
+.viewer-toolbar .doc-name {
+  font-family: var(--form);
+  font-weight: 700;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viewer-toolbar .lock-note {
+  font-family: var(--form);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.viewer-toolbar select { width: 240px; }
+.viewer-toolbar .btn { width: auto; margin-top: 0; padding: 11px 24px; }
+
+.canvas-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: center;
+  padding: 30px 16px 40px;
+  background: var(--paper);
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: inset 0 2px 18px rgba(38, 33, 26, 0.1);
+}
+.canvas-stack canvas {
+  width: 100%;
+  max-width: 860px;
+  height: auto;
+  background: #fff;
+  border: 1px solid #e7dcc4;
+  box-shadow: 0 2px 6px rgba(38, 33, 26, 0.12), 0 16px 34px rgba(38, 33, 26, 0.16);
+}
+
+.big-result { text-align: center; padding: 40px 22px; }
+.stamp {
+  display: inline-block;
+  font-family: var(--form);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 3px solid currentColor;
+  border-radius: 8px;
+  padding: 10px 18px;
+  transform: rotate(-6deg);
+  margin-bottom: 16px;
+}
+.stamp.printed { color: var(--stamp); }
+.stamp.ended { color: var(--ink-soft); }
+.big-result h2 {
+  font-family: var(--form);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+.big-result p { color: var(--ink-soft); }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 24, 14, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--sheet);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 26px 24px;
+  max-width: 420px;
+  width: 100%;
+}
+.modal h3 {
+  font-family: var(--form);
+  font-size: 1.02rem;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.modal .row { display: flex; gap: 12px; }
+
+/* The agent prints silently, but keep the same guarantee anyway: only the
+   document canvases can ever reach a print path. */
+@media print {
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+    background: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .print-area canvas {
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    page-break-after: always;
+  }
+}

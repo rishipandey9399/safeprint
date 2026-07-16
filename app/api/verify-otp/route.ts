@@ -62,7 +62,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   session.viewerTokenHash = hashToken(viewerToken);
   session.status = "verified";
   await session.save();
-  await logAudit(session._id as never, "otp_verified", ip);
+  await logAudit(session._id as never, "otp_verified", ip, {
+    client: req.headers.get("x-safeprint-client") ?? "browser",
+  });
 
   return NextResponse.json({
     viewerToken,
