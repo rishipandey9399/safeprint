@@ -5,6 +5,7 @@
   "description": "SafePrint verified-shop print agent — dialog-free printing to physical printers only",
   "main": "main.js",
   "author": "SafePrint",
+  "homepage": "https://github.com/rishipandey9399/safeprint",
   "license": "UNLICENSED",
   "scripts": {
     "postinstall": "node scripts/copy-vendor.cjs",
