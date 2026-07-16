@@ -641,6 +641,243 @@ input[type="file"]::file-selector-button:focus-visible {
   max-width: 880px;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+/* ---- site navbar: a form header that sticks ---- */
+.site-nav {
+  position: sticky;
+  top: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--sheet);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  margin-bottom: 26px;
+  box-shadow: inset 0 0 0 1px #fff, var(--shadow-sheet);
+}
+
+.nav-brand {
+  font-family: var(--form);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.nav-brand span {
+  color: var(--stamp);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.nav-links a {
+  font-family: var(--form);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: 6px 0;
+  border-bottom: 2px solid transparent;
+}
+
+.nav-links a:hover {
+  color: var(--stamp-deep);
+  border-bottom-color: var(--stamp-deep);
+}
+
+.nav-links a:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.nav-links .nav-cta {
+  color: #fff;
+  background: var(--stamp-deep);
+  padding: 9px 16px;
+  border-radius: var(--radius);
+  border-bottom: none;
+  box-shadow: 0 2px 0 var(--stamp-press);
+}
+
+.nav-links .nav-cta:hover {
+  background: var(--stamp-press);
+  color: #fff;
+}
+
+/* ---- hero load sequence: lines rise like typed entries, then the seal slams ---- */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-claim h2 {
+  animation: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) 0.05s both;
+}
+.hero-sub {
+  animation: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) 0.18s both;
+}
+.hero-actions {
+  animation: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) 0.3s both;
+}
+.hero-seal.stamp-land {
+  animation-delay: 0.55s;
+}
+
+/* ---- scroll reveals ---- */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.55s ease, transform 0.55s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .hero-claim h2,
+  .hero-sub,
+  .hero-actions,
+  .hero-seal.stamp-land {
+    animation: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---- shared footer ---- */
+.site-footer {
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+}
+
+.foot-guarantee {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  max-width: 62ch;
+}
+
+.foot-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--form);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.foot-row nav {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.foot-row a {
+  font-weight: 700;
+  color: var(--stamp-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.foot-row a:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---- legal / about pages ---- */
+.legal .legal-title {
+  font-family: var(--form);
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 8px 0 4px;
+}
+
+.legal .legal-updated {
+  font-family: var(--form);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+
+.legal .card {
+  counter-increment: clause;
+}
+
+.legal .card h3 {
+  font-family: var(--form);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.legal .card h3::before {
+  content: "§" counter(clause) " · ";
+  color: var(--stamp-deep);
+}
+
+.legal .card p,
+.legal .card li {
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+.legal .card strong {
+  color: var(--ink);
+}
+
+.legal .card a {
+  color: var(--stamp-deep);
+  font-weight: 600;
+}
+
+.legal-list {
+  padding-left: 20px;
+  display: grid;
+  gap: 10px;
+}
+
 .hero {
   display: flex;
   align-items: center;

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import RubberStamp from "@/components/RubberStamp";
+import SiteNav from "@/components/SiteNav";
+import SiteFooter from "@/components/SiteFooter";
+import Reveal from "@/components/Reveal";
 
 const AGENT_VERSION = "0.1.0";
 const RELEASE = `https://github.com/rishipandey9399/safeprint/releases/download/agent-v${AGENT_VERSION}`;
@@ -44,12 +47,7 @@ export default function DownloadPage() {
 
   return (
     <main className="page landing">
-      {/* ---- masthead ---- */}
-      <div className="brand">
-        <h1>
-          SafePrint<span className="logo-dot">.</span>
-        </h1>
-      </div>
+      <SiteNav />
       <span className="formref">Form SP-0 · Public notice</span>
 
       {/* ---- hero: the thesis, sealed ---- */}
@@ -79,6 +77,7 @@ export default function DownloadPage() {
       </section>
 
       {/* ---- the problem, as a ledger ---- */}
+      <Reveal>
       <section className="ledger card">
         <h2>What happens to your document today</h2>
         <div className="ledger-row">
@@ -98,9 +97,11 @@ export default function DownloadPage() {
           SafePrint removes the file — so there is nothing to leak.
         </p>
       </section>
+      </Reveal>
 
       {/* ---- how it works: a real sequence ---- */}
-      <section className="card">
+      <Reveal>
+      <section className="card" id="how">
         <h2>How it works</h2>
         <ol className="steps">
           <li>
@@ -118,8 +119,10 @@ export default function DownloadPage() {
           </li>
         </ol>
       </section>
+      </Reveal>
 
       {/* ---- two tiers, honestly compared ---- */}
+      <Reveal>
       <section className="card">
         <h2>Two ways for a shop to print</h2>
         <div className="compare-scroll">
@@ -171,7 +174,10 @@ export default function DownloadPage() {
         </p>
       </section>
 
+      </Reveal>
+
       {/* ---- the download slip ---- */}
+      <Reveal>
       <section className="card dl-slip" id="download">
         <span className="sheet-ref">AGENT v{AGENT_VERSION}</span>
         <h2>Download the SafePrint Agent</h2>
@@ -200,14 +206,9 @@ export default function DownloadPage() {
           <em>Open</em> the first time.
         </p>
       </section>
+      </Reveal>
 
-      <footer className="landing-footer">
-        <span>
-          SafePrint never stores a readable file: encrypted at rest, destroyed after one print or
-          30 minutes — whichever comes first.
-        </span>
-        <a href="https://github.com/rishipandey9399/safeprint">Source &amp; audit — GitHub</a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }
