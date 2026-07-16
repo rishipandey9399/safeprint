@@ -131,6 +131,9 @@ export default function ShopPortal() {
           Wrong OTP 5 times locks the session and deletes the customer&apos;s file. Sessions
           self-destruct 30 minutes after upload.
         </p>
+        <a className="crosslink" href="/download">
+          Print without the system dialog — get the SafePrint Agent
+        </a>
       </div>
     </main>
   );

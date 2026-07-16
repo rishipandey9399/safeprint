@@ -635,6 +635,224 @@ input[type="file"]::file-selector-button:focus-visible {
 }
 
 /* =========================================================================
+   Landing page (/download) — public notice + download slip
+   ========================================================================= */
+.page.landing {
+  max-width: 880px;
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  margin: 30px 0 34px;
+}
+
+.hero-claim {
+  flex: 1;
+}
+
+.hero-claim h2 {
+  font-family: var(--form);
+  font-size: clamp(2rem, 5.5vw, 3.1rem);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.hero-sub {
+  color: var(--ink-soft);
+  font-size: 1.02rem;
+  max-width: 46ch;
+  margin: 16px 0 4px;
+}
+
+.hero-sub strong {
+  color: var(--ink);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-actions .btn {
+  width: auto;
+  text-decoration: none;
+  text-align: center;
+}
+
+.hero-seal {
+  flex-shrink: 0;
+  color: var(--stamp);
+  opacity: 0.88;
+}
+
+/* problem ledger */
+.ledger-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px dotted var(--rule);
+  font-size: 0.94rem;
+}
+
+.ledger-step {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ledger-result {
+  font-family: var(--form);
+  color: var(--stamp-deep);
+  text-align: right;
+}
+
+/* comparison sheet */
+.compare-scroll {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.compare th,
+.compare td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px dotted var(--rule);
+  vertical-align: top;
+}
+
+.compare thead th {
+  font-family: var(--form);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  border-bottom: 2px solid var(--ink);
+}
+
+.compare tbody th {
+  font-weight: 600;
+  color: var(--ink);
+  width: 42%;
+}
+
+.compare td.yes {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.compare td.no {
+  color: var(--stamp-deep);
+  font-weight: 600;
+}
+
+/* download slip */
+.dl-slip {
+  border-width: 2px;
+}
+
+.dl-main {
+  text-decoration: none;
+  text-align: center;
+  display: block;
+}
+
+.dl-note {
+  font-family: var(--form);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 8px;
+}
+
+.dl-others {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rule);
+}
+
+.dl-alt {
+  font-family: var(--form);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--stamp-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dl-alt:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.landing-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.landing-footer a {
+  font-family: var(--form);
+  font-weight: 700;
+  color: var(--stamp-deep);
+}
+
+/* small cross-link used on the app pages */
+.crosslink {
+  display: block;
+  text-align: center;
+  margin-top: 18px;
+  font-family: var(--form);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--stamp-deep);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .hero {
+    flex-direction: column-reverse;
+    text-align: left;
+    gap: 8px;
+  }
+  .hero-seal {
+    align-self: flex-end;
+    margin-right: 8px;
+  }
+  .ledger-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ledger-result {
+    text-align: left;
+  }
+}
+
+/* =========================================================================
    Print — only the document canvases reach the printer
    ========================================================================= */
 @media print {

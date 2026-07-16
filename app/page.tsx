@@ -121,6 +121,9 @@ export default function UploadPage() {
             Your file is encrypted before it is stored, can only be opened once with the OTP you
             hold, and is permanently deleted after printing or 30 minutes — whichever comes first.
           </p>
+          <a className="crosslink" href="/download">
+            What is SafePrint? · Get the shop agent
+          </a>
         </div>
       )}
 
