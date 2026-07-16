@@ -6,7 +6,7 @@ import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import Reveal from "@/components/Reveal";
 
-const AGENT_VERSION = "0.1.1";
+const AGENT_VERSION = "0.1.2";
 const RELEASE = `https://github.com/rishipandey9399/safeprint/releases/download/agent-v${AGENT_VERSION}`;
 
 type OS = "windows" | "mac" | "linux";
@@ -207,9 +207,12 @@ export default function DownloadPage() {
             <em>More info → Run anyway</em>.
           </p>
           <p>
-            <strong>macOS</strong> — the download is blocked on first open. Open <em>Terminal</em>
-            {" "}and run, then launch the app normally:
+            <strong>macOS</strong> — the first open is blocked with &ldquo;Apple could not verify
+            &hellip;&rdquo;. Move the app to <em>Applications</em>, try to open it once, then go to{" "}
+            <em>System Settings → Privacy &amp; Security</em>, scroll to the <em>Security</em>{" "}
+            section, and click <em>Open Anyway</em> next to SafePrint Agent. You only do this once.
           </p>
+          <p>Or, if you prefer Terminal, run this once and then open the app normally:</p>
           <pre className="dl-cmd">xattr -dr com.apple.quarantine &quot;/Applications/SafePrint Agent.app&quot;</pre>
           <p>
             <strong>Linux</strong> — mark the AppImage executable

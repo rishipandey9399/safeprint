@@ -1,53 +1,43 @@
 /**
  * Deterministic ad-hoc code signing for macOS builds.
  *
- * Without a paid Apple Developer ID we cannot notarize, but we MUST still
- * produce a *valid* signature with the app's resources sealed. Electron's
- * default build leaves only a linker ad-hoc signature ("Identifier=Electron",
- * no sealed resources); on Apple Silicon macOS rejects that as "damaged and
- * can't be opened". A proper `codesign --force --deep --sign -` seals the
- * bundle so the app launches (after the user clears the download quarantine
- * or right-click → Open).
+ * Without a paid Apple Developer ID we cannot notarize, but on Apple Silicon
+ * the app MUST carry a *uniform, valid* ad-hoc signature or it will not run:
+ *   - Electron's default leaves only a linker ad-hoc stub with no sealed
+ *     resources -> "damaged and can't be opened".
+ *   - Signing pieces with mismatched flags (e.g. hardened runtime on some but
+ *     not all, or leaving the framework with its prebuilt signature) makes the
+ *     dynamic loader reject the app at launch with "different Team IDs" even
+ *     though `codesign --verify` statically passes.
  *
- * Nested code is signed inside-out first, then the outer bundle last, which
- * is what codesign requires for a valid seal.
+ * The fix is one recursive ad-hoc pass over the whole bundle with a single
+ * identity and NO hardened runtime (hardened runtime is only for notarized
+ * Developer ID builds). `--deep` here is correct precisely because ad-hoc
+ * signing carries no entitlements to lose, so every nested Mach-O ends up with
+ * the same empty Team ID and the loader is satisfied.
+ *
+ * IMPORTANT: builds are validated by actually launching them (npm run
+ * verify:launch), not just `codesign --verify` — static verification passed
+ * for a bundle that still refused to launch.
  */
 const { execFileSync } = require("child_process");
-const fs = require("fs");
 const path = require("path");
-
-function sign(target) {
-  execFileSync(
-    "codesign",
-    ["--force", "--sign", "-", "--timestamp=none", "--options", "runtime", target],
-    { stdio: "inherit" }
-  );
-}
 
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return;
 
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(context.appOutDir, `${appName}.app`);
-  const frameworks = path.join(appPath, "Contents", "Frameworks");
 
-  // 1) nested frameworks and helper apps, deepest first
-  if (fs.existsSync(frameworks)) {
-    for (const entry of fs.readdirSync(frameworks)) {
-      const p = path.join(frameworks, entry);
-      if (entry.endsWith(".app")) {
-        const inner = path.join(p, "Contents", "MacOS");
-        if (fs.existsSync(inner)) {
-          for (const bin of fs.readdirSync(inner)) sign(path.join(inner, bin));
-        }
-        sign(p);
-      } else {
-        sign(p); // .framework / .dylib
-      }
-    }
-  }
+  // Single recursive ad-hoc signature, no hardened runtime, resources sealed.
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], {
+    stdio: "inherit",
+  });
 
-  // 2) the outer bundle last
-  sign(appPath);
-  console.log(`[afterpack-sign] ad-hoc signed ${appName}.app`);
+  // Fail the build loudly if the seal is somehow still invalid.
+  execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], {
+    stdio: "inherit",
+  });
+
+  console.log(`[afterpack-sign] ad-hoc signed + verified ${appName}.app`);
 };
