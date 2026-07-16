@@ -235,6 +235,13 @@ $("again-btn").addEventListener("click", () => {
 
   const report = { ok: false, steps: {} };
   try {
+    // Regression check: the confirm modal must be invisible until a print
+    // happens. A class display rule once overrode [hidden] and the dead
+    // modal blocked the whole UI from launch.
+    const modalDisplay = getComputedStyle($("confirm-modal")).display;
+    report.steps.modalHiddenAtLaunch =
+      modalDisplay === "none" ? "pass" : `FAIL — computed display: ${modalDisplay}`;
+
     const result = await verifyAndOpen(cfg.server, cfg.code, cfg.otp);
     report.steps.verify = result.ok ? "pass" : `fail: ${result.error}`;
     if (!result.ok) throw new Error(result.error);
@@ -265,6 +272,7 @@ $("again-btn").addEventListener("click", () => {
     await window.agent.closeSession();
     report.steps.sessionClose = "pass";
     report.ok =
+      report.steps.modalHiddenAtLaunch === "pass" &&
       report.steps.render.startsWith("pass") &&
       report.steps.watermark.startsWith("pass") &&
       report.steps.spoofRejected === "pass";

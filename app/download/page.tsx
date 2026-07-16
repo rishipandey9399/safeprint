@@ -6,7 +6,7 @@ import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import Reveal from "@/components/Reveal";
 
-const AGENT_VERSION = "0.1.0";
+const AGENT_VERSION = "0.1.1";
 const RELEASE = `https://github.com/rishipandey9399/safeprint/releases/download/agent-v${AGENT_VERSION}`;
 
 type OS = "windows" | "mac" | "linux";

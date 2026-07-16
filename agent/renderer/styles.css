@@ -18,6 +18,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* The hidden attribute must always win — class display rules (e.g.
+   .modal-backdrop { display:flex }) otherwise override the UA's
+   [hidden] { display:none } and dead modals cover the whole window. */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--body);
   color: var(--ink);
