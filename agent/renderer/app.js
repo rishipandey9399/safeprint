@@ -10,7 +10,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 const $ = (id) => document.getElementById(id);
 const screens = { connect: $("connect-screen"), viewer: $("viewer-screen"), done: $("done-screen") };
 
-let shareCode = "";
 let attemptsLeft = 2;
 
 function show(name) {
@@ -26,54 +25,14 @@ for (const evt of ["contextmenu", "dragstart", "copy", "cut"]) {
 }
 
 // ---------------------------------------------------------------------------
-// Watermark — identical construction to the web viewer, so any copy that
-// somehow escapes (photo of the screen, paper) stays session-traceable.
-// ---------------------------------------------------------------------------
-function applyWatermark(canvas, label, footer) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const w = canvas.width;
-  const h = canvas.height;
-
-  ctx.save();
-  const fontSize = Math.max(18, Math.round(w / 26));
-  ctx.font = `700 ${fontSize}px "Courier New", monospace`;
-  ctx.fillStyle = "rgba(178, 62, 29, 0.13)";
-  ctx.textAlign = "center";
-  ctx.translate(w / 2, h / 2);
-  ctx.rotate(-Math.PI / 6);
-  const stepX = ctx.measureText(label).width + fontSize * 3;
-  const stepY = fontSize * 5;
-  let row = 0;
-  for (let y = -h; y < h; y += stepY, row++) {
-    const offset = (row % 2) * (stepX / 2);
-    for (let x = -w - offset; x < w; x += stepX) {
-      ctx.fillText(label, x + offset, y);
-    }
-  }
-  ctx.restore();
-
-  ctx.save();
-  const footSize = Math.max(11, Math.round(w / 72));
-  ctx.font = `${footSize}px "Courier New", monospace`;
-  ctx.fillStyle = "rgba(38, 33, 26, 0.78)";
-  ctx.textAlign = "center";
-  ctx.fillText(footer, w / 2, h - footSize * 0.9);
-  ctx.restore();
-}
-
-// ---------------------------------------------------------------------------
-// Document rendering
+// Document rendering.
+// No watermark: the agent prints straight to a physical printer with no
+// Save-as-PDF path, so copies can't escape the print step — the browser
+// portal, which can't control the print dialog, keeps the watermark instead.
 // ---------------------------------------------------------------------------
 async function renderDocument(bytes, mimeType) {
   const stack = $("stack");
   stack.textContent = "";
-
-  const label = `SAFEPRINT · SP-${shareCode} · AGENT`;
-  const footer = `Printed via SafePrint Agent · SP-${shareCode} · ${new Date().toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })} · single authorised copy — duplication prohibited`;
 
   if (mimeType.includes("pdf")) {
     const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
@@ -84,7 +43,6 @@ async function renderDocument(bytes, mimeType) {
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-      applyWatermark(canvas, label, footer);
       stack.appendChild(canvas);
     }
   } else {
@@ -94,7 +52,6 @@ async function renderDocument(bytes, mimeType) {
     canvas.height = bitmap.height;
     canvas.getContext("2d").drawImage(bitmap, 0, 0);
     bitmap.close();
-    applyWatermark(canvas, label, footer);
     stack.appendChild(canvas);
   }
 }
@@ -122,8 +79,7 @@ async function refreshPrinters() {
       ? "No physical printer found. Connect a printer — virtual destinations (Save as PDF, XPS…) are not allowed."
       : `${physical.length} physical printer(s) available` +
         (filtered.length ? ` · ${filtered.length} virtual destination(s) blocked` : "");
-  $("printer-note").textContent =
-    note + ` · every copy carries the watermark SP-${shareCode} and is logged.`;
+  $("printer-note").textContent = note + " · this print is logged to the session audit trail.";
   return { physical, filtered };
 }
 
@@ -143,7 +99,6 @@ async function verifyAndOpen(server, code, otp) {
   const result = await window.agent.verify({ server, code, otp });
   if (!result.ok) return result;
 
-  shareCode = code.toUpperCase();
   attemptsLeft = result.printAttemptsLeft;
   $("doc-name").textContent = result.fileName;
   $("attempts-note").textContent = `Physical print only · ${attemptsLeft} print(s) left`;
@@ -249,16 +204,6 @@ $("again-btn").addEventListener("click", () => {
     const canvases = document.querySelectorAll("#stack canvas");
     report.steps.render = canvases.length > 0 ? `pass (${canvases.length} page canvas)` : "fail";
 
-    // Prove the watermark is baked into the printable pixels.
-    const c = canvases[0];
-    const ctx = c.getContext("2d");
-    const mid = ctx.getImageData(0, Math.floor(c.height / 2) - 50, c.width, 100).data;
-    let tinted = 0;
-    for (let i = 0; i < mid.length; i += 4) {
-      if (mid[i] > 220 && mid[i + 2] < 235 && mid[i] - mid[i + 2] > 12) tinted++;
-    }
-    report.steps.watermark = tinted > 500 ? `pass (${tinted} tinted px)` : `fail (${tinted})`;
-
     const { physical, filtered } = await refreshPrinters();
     report.steps.printers = {
       physical: physical.map((p) => p.name),
@@ -274,7 +219,6 @@ $("again-btn").addEventListener("click", () => {
     report.ok =
       report.steps.modalHiddenAtLaunch === "pass" &&
       report.steps.render.startsWith("pass") &&
-      report.steps.watermark.startsWith("pass") &&
       report.steps.spoofRejected === "pass";
   } catch (err) {
     report.error = String(err && err.message ? err.message : err);

@@ -1,6 +1,6 @@
 {
   "name": "safeprint-agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "SafePrint verified-shop print agent — dialog-free printing to physical printers only",
   "main": "main.js",

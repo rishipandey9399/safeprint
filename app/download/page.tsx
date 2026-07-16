@@ -6,7 +6,7 @@ import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import Reveal from "@/components/Reveal";
 
-const AGENT_VERSION = "0.1.2";
+const AGENT_VERSION = "0.1.3";
 const RELEASE = `https://github.com/rishipandey9399/safeprint/releases/download/agent-v${AGENT_VERSION}`;
 
 type OS = "windows" | "mac" | "linux";
@@ -169,8 +169,10 @@ export default function DownloadPage() {
           </table>
         </div>
         <p className="hint">
-          Every print, either way: session-coded watermark on each page, one-time OTP, two print
-          attempts maximum, full audit log, file destroyed after printing.
+          Every print, either way: one-time OTP, two print attempts maximum, full audit log, and
+          the file destroyed after printing. The browser portal also watermarks each page, since it
+          can&rsquo;t control the print dialog; the agent prints clean because it blocks the save
+          path outright.
         </p>
       </section>
 

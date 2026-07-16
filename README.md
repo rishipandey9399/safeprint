@@ -84,7 +84,7 @@ print or 30 minutes.
 |---|---|
 | Encryption, session/OTP lifecycle, audit log, TTL cleanup | Real, working |
 | Locked viewer (PDF.js on canvas) + print flow | Real, working |
-| Session-coded watermark on every rendered/printed pixel | Real, working |
+| Session-coded watermark on every rendered/printed pixel (browser portal only) | Real, working |
 | Local encrypted storage (`lib/storage/local.ts`) | Real — dev stand-in for GCS behind the same interface |
 | GCS storage (`lib/storage/gcs.ts`) | Written but unexercised — needs `npm i @google-cloud/storage`, creds, bucket + 1-day lifecycle rule (deletion backstop); see file header |
 | SMS/OTP delivery (`lib/otp.ts`) | Mocked — logs to console; swap in MSG91/Twilio behind `OtpProvider` |
@@ -107,21 +107,22 @@ entirely:
   print time, so a spoofed request from the UI is rejected too.
 - **Screenshot/screen-capture blocking** — `setContentProtection(true)`: the window renders
   black in captures and screen shares on **Windows** (`SetWindowDisplayAffinity`) and **macOS**
-  (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap, watermark still
-  applies.
+  (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap.
 - **Token isolation** — the viewer token lives only in the Electron main process; the sandboxed
   renderer (contextIsolation, no Node, CSP, all navigation/permissions denied) receives document
   bytes and printer names, nothing else.
-- **Same watermark + audit** — every pixel carries `SAFEPRINT · SP-<code> · AGENT`; the server
-  logs `client: agent/<version>` in the audit trail (`X-SafePrint-Client` header), so
-  agent-verified prints are distinguishable from browser prints.
+- **Audit attribution** — the server logs `client: agent/<version>` in the audit trail
+  (`X-SafePrint-Client` header), so agent-verified prints are distinguishable from browser prints.
+- **No watermark** — unlike the browser portal, the agent prints clean. The watermark is the
+  browser's fallback for a print path it can't control; the agent removes that path outright
+  (dialog-free, physical printers only), so the watermark is unnecessary.
 - **Nothing on disk** — decrypted bytes exist only in memory; canvases are wiped on completion;
   closing the window fires a best-effort session-close so the server destroys the file.
 
-Still not stoppable, agent or not: photographing the screen/paper (the watermark keeps such
-copies traceable), an admin who installs a capture driver or a virtual printer masquerading with
-a physical driver's name (the filter is a heuristic), and OS spooler artifacts (jobs are
-rasterized; direct-spool scrubbing would be a production hardening step).
+Still not stoppable, agent or not: photographing the screen/paper, an admin who installs a
+capture driver or a virtual printer masquerading with a physical driver's name (the filter is a
+heuristic), and OS spooler artifacts (jobs are rasterized; direct-spool scrubbing would be a
+production hardening step).
 
 ```bash
 cd agent && npm install          # also vendors pdf.js into renderer/
