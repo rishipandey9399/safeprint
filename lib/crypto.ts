@@ -64,9 +64,13 @@ export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-/** OTPs are stored as HMACs keyed by the master key, never in plaintext. */
+// The OTP key is derived from the master key, not the master key itself, so
+// no single key serves both key-wrapping (AES) and OTP hashing (HMAC).
+const otpKey = Buffer.from(crypto.hkdfSync("sha256", config.masterKey, Buffer.alloc(0), "safeprint/otp/v1", 32));
+
+/** OTPs are stored as HMACs under a derived key, never in plaintext. */
 export function hmacOtp(code: string): string {
-  return crypto.createHmac("sha256", config.masterKey).update(code).digest("hex");
+  return crypto.createHmac("sha256", otpKey).update(code).digest("hex");
 }
 
 export function timingSafeEqualHex(a: string, b: string): boolean {

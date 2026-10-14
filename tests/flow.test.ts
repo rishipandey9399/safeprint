@@ -93,9 +93,9 @@ describe("SafePrint session flow", () => {
     const queue = await (await jobs(req("/api/shops/jobs", { headers: { "X-SafePrint-Shop-Key": shop.deviceKey } }))).json();
     assert.deepEqual(queue.jobs.map((j: any) => j.shareCode), [s.shareCode]);
 
-    assert.equal((await verifyReq(s.shareCode, s.otp)).status, 404, "no counter key");
+    assert.equal((await verifyReq(s.shareCode, s.otp)).status, 401, "no counter key");
     const other = await newShop();
-    assert.equal((await verifyReq(s.shareCode, s.otp, other.deviceKey)).status, 404, "wrong counter");
+    assert.equal((await verifyReq(s.shareCode, s.otp, other.deviceKey)).status, 401, "wrong counter");
 
     const v = await verifyReq(s.shareCode, s.otp, shop.deviceKey);
     assert.equal(v.status, 200);
@@ -139,7 +139,8 @@ describe("SafePrint session flow", () => {
     if (!mongoUp) return t.skip("MongoDB not reachable");
     const s = await newUpload();
     await Session.updateOne({ shareCode: s.shareCode }, { otpExpiresAt: new Date(Date.now() - 1000) });
-    assert.equal((await verifyReq(s.shareCode, s.otp)).status, 410);
+    // Without the paired counter key, an expired OTP looks like any other failure.
+    assert.equal((await verifyReq(s.shareCode, s.otp)).status, 401);
     const st = await (await status(req("/api/status", { headers: bearer(s.ownerToken) }))).json();
     assert.equal(st.otpAttemptsLeft, 5);
   });
@@ -162,7 +163,7 @@ describe("SafePrint session flow", () => {
     const s = await newUpload();
     const wrong = s.otp === "000000" ? "111111" : "000000";
     for (let i = 0; i < 4; i++) assert.equal((await verifyReq(s.shareCode, wrong)).status, 401);
-    assert.equal((await verifyReq(s.shareCode, wrong)).status, 423);
+    assert.equal((await verifyReq(s.shareCode, wrong)).status, 401, "lockout is not announced to strangers");
     const doc = await Session.findOne({ shareCode: s.shareCode });
     assert.equal(doc.status, "locked");
     assert.equal(doc.wrappedKey, "", "keys crypto-shredded");
@@ -174,6 +175,86 @@ describe("SafePrint session flow", () => {
     const s = await newUpload();
     assert.equal((await status(req(`/api/status?ownerToken=${s.ownerToken}`))).status, 404);
     assert.equal((await status(req("/api/status", { headers: bearer(s.ownerToken) }))).status, 200);
+  });
+
+  test("verify-otp gives strangers no oracle for which share codes exist", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const s = await newUpload();
+    const wrong = s.otp === "000000" ? "111111" : "000000";
+    const unknown = await verifyReq("ZZZZZZ", wrong);
+    const real = await verifyReq(s.shareCode, wrong);
+    assert.equal(unknown.status, real.status);
+    assert.deepEqual(await unknown.json(), await real.json());
+  });
+
+  test("the paired counter still gets specific messages for its own sessions", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const shop = await newShop();
+    const s = await newUpload(shop.shopCode);
+    const wrong = s.otp === "000000" ? "111111" : "000000";
+    const r = await verifyReq(s.shareCode, wrong, shop.deviceKey);
+    assert.equal(r.status, 401);
+    assert.match((await r.json()).error, /4 attempt\(s\) left/);
+    await Session.updateOne({ shareCode: s.shareCode }, { otpExpiresAt: new Date(Date.now() - 1000) });
+    assert.equal((await verifyReq(s.shareCode, s.otp, shop.deviceKey)).status, 410);
+  });
+
+  test("checks against one share code are capped per minute, whatever the IP", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const s = await newUpload();
+    const wrong = s.otp === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 4; i++) await verifyReq(s.shareCode, wrong); // each from a new IP
+    // 5th check of this minute is still allowed, the 6th is braked.
+    await verifyReq("ABCDEF", wrong);
+    const codes = [];
+    for (let i = 0; i < 6; i++) codes.push((await verifyReq("KQ2X9M", wrong)).status);
+    assert.deepEqual(codes, [401, 401, 401, 401, 401, 429]);
+  });
+
+  test("a service-wide miss budget brakes scanning, but never registered counters", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const { config } = await import("@/lib/config");
+    const saved = config.verifyGlobalMissesPerMinute;
+    config.verifyGlobalMissesPerMinute = 3;
+    // Earlier tests' misses share the in-memory window; start this one clean.
+    (global as unknown as { _rateBuckets: Map<string, number[]> })._rateBuckets.delete("verify-miss:global");
+    try {
+      const shop = await newShop();
+      const paired = await newUpload(shop.shopCode);
+      const codes = ["MMMMM2", "MMMMM3", "MMMMM4", "MMMMM5"];
+      const statuses = [];
+      for (const c of codes) statuses.push((await verifyReq(c, "123456")).status);
+      assert.deepEqual(statuses.slice(0, 3), [401, 401, 401]);
+      assert.equal(statuses[3], 429, "scanner braked");
+      const v = await verifyReq(paired.shareCode, paired.otp, shop.deviceKey);
+      assert.equal(v.status, 200, "a registered counter is unaffected");
+    } finally {
+      config.verifyGlobalMissesPerMinute = saved;
+    }
+  });
+
+  test("ended sessions keep no file name, expire by TTL, and audit logs carry no names", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const { AuditLog } = await import("@/models/AuditLog");
+    const s = await newUpload();
+    const wrong = s.otp === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 5; i++) await verifyReq(s.shareCode, wrong); // lock -> finalize
+    const doc = await Session.findOne({ shareCode: s.shareCode });
+    assert.equal(doc.status, "locked");
+    assert.equal(doc.fileName, "[deleted]");
+    const days = (doc.purgeAt.getTime() - Date.now()) / 86400_000;
+    assert.ok(days > 29 && days <= 30, `purgeAt ~30 days out (${days})`);
+
+    const up = await AuditLog.findOne({ sessionId: doc._id, event: "upload" });
+    assert.equal(up!.meta.fileName, undefined);
+    assert.equal(up!.meta.ext, "pdf");
+
+    await Session.init();
+    await AuditLog.init();
+    const ttl = (idx: Array<{ key: Record<string, number>; expireAfterSeconds?: number }>, field: string) =>
+      idx.find((i) => i.key[field] === 1 && i.expireAfterSeconds !== undefined)?.expireAfterSeconds;
+    assert.equal(ttl(await Session.collection.indexes() as never, "purgeAt"), 0);
+    assert.equal(ttl(await AuditLog.collection.indexes() as never, "at"), 90 * 86400);
   });
 
   test("unknown shop code is rejected at upload", async (t) => {

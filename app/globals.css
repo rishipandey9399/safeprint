@@ -1284,6 +1284,11 @@ html {
   cursor: default;
 }
 
+.counter-check {
+  font-family: var(--form);
+  letter-spacing: 0.12em;
+}
+
 /* turned copies exist only for the printout */
 .canvas-stack canvas.print-only {
   display: none;

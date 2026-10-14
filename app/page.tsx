@@ -11,6 +11,7 @@ interface ActiveSession {
   expiresAt: string;
   otpExpiresAt: string;
   shopName: string | null;
+  shopCode?: string | null;
 }
 
 interface ShopChoice {
@@ -387,6 +388,14 @@ export default function UploadPage() {
           {paired && (
             <p className="hint" style={{ marginTop: 0, marginBottom: 14 }}>
               Printing at <strong>{shopName}</strong>
+              {session.shopCode && (
+                <>
+                  {" "}
+                  · counter <strong className="counter-check">{session.shopCode}</strong>
+                  <br />
+                  Check this code matches the one shown at the counter — anyone can name a counter after a real shop.
+                </>
+              )}
             </p>
           )}
 
@@ -397,6 +406,7 @@ export default function UploadPage() {
               </h3>
               <p>
                 Only allow it if you are at that counter right now and you just told them your OTP.
+                {session.shopCode ? ` Its counter code is ${session.shopCode}.` : ""}
               </p>
               <div className="row">
                 <button className="btn secondary" disabled={busy} onClick={() => decide("deny")}>

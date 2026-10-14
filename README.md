@@ -101,6 +101,10 @@ extra. To customize, copy `.env.example` to `.env`:
 | `WORD_CONVERSION_CONCURRENCY` | `2` | Word conversions running at once (per app process) |
 | `WORD_CONVERSION_QUEUE` | `10` | Further Word uploads allowed to wait; beyond that they get **503 "busy, try again"** |
 | `WORD_CONVERSION_WAIT_MS` | `20000` | How long a waiting Word upload waits for a slot before getting 503 |
+| `TRUST_PROXY_HOPS` | `1` | Proxies in front of the app that **append** to `X-Forwarded-For` (nginx `$proxy_add_x_forwarded_for`, a load balancer). The client IP is taken that many entries **from the right**; the client-supplied left part is never trusted. `2` for CDN → LB → app; `0` if nothing is in front (then all clients share one rate-limit bucket — don't expose `next start` directly) |
+| `VERIFY_GLOBAL_MISS_LIMIT` | `300` | Failed OTP checks per minute, service-wide, before verification **without a counter key** pauses for a minute (registered counters are never braked) |
+| `SESSION_RETENTION_DAYS` | `30` | Ended sessions keep a scrubbed record (no file name) this long, then MongoDB deletes it (TTL) |
+| `AUDIT_RETENTION_DAYS` | `90` | Audit entries (they carry client IPs) expire after this. Changing it later needs a `collMod` on the `at_1` index |
 
 ## Security model
 
@@ -119,11 +123,35 @@ extra. To customize, copy `.env.example` to `.env`:
   `<a>/<img>/<embed>/<iframe>` elements; `user-select: none`; right-click/copy/drag/Ctrl+S/Ctrl+P
   suppressed. Print uses `@media print` CSS so only the canvases reach the print dialog.
 - **Rate limits**: 10 uploads/hour/IP, 15 OTP checks/min/IP, 30 renders/min/IP, 5 counter
-  registrations/hour/IP, plus per-session caps (5 OTP tries, 5 OTP regenerations, 2 print
-  attempts, 20 render fetches). Redis-backed when `REDIS_URL` is set.
+  registrations/hour/IP, 30 status streams/min/IP (max 3 open per session), plus per-session caps
+  (5 OTP tries, 5 OTP regenerations, 2 print attempts, 20 render fetches). Client IPs come only
+  from the hop our own proxy appended (`TRUST_PROXY_HOPS`), so a forged `X-Forwarded-For` can't
+  dodge them. Redis-backed when `REDIS_URL` is set (in-memory limits are per process).
+- **No share-code oracle**: `/api/verify-otp` answers every failure a stranger could probe
+  (unknown code, another counter's session, wrong/expired OTP, lockout) with the same
+  `401 "Wrong code or OTP."`; only the paired counter gets specific messages for its own sessions.
+  Each share code allows 5 checks/minute whatever the IP, and once failed checks pass
+  `VERIFY_GLOBAL_MISS_LIMIT`/minute service-wide, unpaired verification pauses — scanning for live
+  codes (to lock other people's sessions) is impractical, and registered counters are unaffected.
+- **Bounded uploads**: request bodies are refused on `Content-Length` and cut off while
+  streaming once past the limit, before anything is parsed — an oversized upload can't exhaust
+  server memory.
+- **Browser hardening**: a nonce-based Content-Security-Policy on every page (`strict-dynamic`; the
+  only third-party origin is your ONLYOFFICE server, when configured), `frame-ancestors 'none'`,
+  HSTS in production, `Referrer-Policy: no-referrer`, a locked-down `Permissions-Policy`. In
+  production `ONLYOFFICE_URL` must be `https://` (its script runs inside the shop's page). The
+  unused Next.js image optimizer is disabled.
 - **Audit log** per session: upload, OTP failures/success/regeneration, approval
   requested/granted/denied/timed out, renders, print attempts, confirmation, deletion, expiry —
-  each with timestamp + IP (+ counter id) (`auditlogs` collection).
+  each with timestamp + IP (+ counter id) (`auditlogs` collection). Uploads are logged by file type
+  and size, never file name.
+- **Retention**: when a session ends its file name is replaced with `[deleted]` immediately; the
+  scrubbed record is deleted after `SESSION_RETENTION_DAYS` and audit entries after
+  `AUDIT_RETENTION_DAYS` (MongoDB TTL indexes). Older ended sessions are scrubbed by the cleanup
+  sweep.
+- **Key separation**: the OTP HMAC key is derived from `MASTER_KEY` with HKDF
+  (`safeprint/otp/v1`), separate from the key that wraps file keys. (OTPs issued before this change
+  stop matching; the customer taps Regenerate.)
 
 - **Editing** never gives the shop a file: the image editor works on in-memory canvases and
   uploads its result straight to `/api/edit/pages`; the Word editor is ONLYOFFICE with download,
@@ -201,6 +229,9 @@ entirely:
   CUPS-PDF, PDF24, CutePDF, Foxit…) are filtered by name *and* driver-model string
   (`agent/printer-filter.cjs`, unit-tested). The main process re-validates the chosen printer at
   print time, so a spoofed request from the UI is rejected too.
+- **HTTPS-only servers** — the agent refuses `http://` server addresses (they would carry the
+  counter's device key, the session token and document bytes in clear), except a server on the
+  same machine (`localhost`/`127.0.0.1`) for testing. Built on Electron 44.
 - **Screenshot/screen-capture blocking** — `setContentProtection(true)`: the window renders
   black in captures and screen shares on **Windows** (`SetWindowDisplayAffinity`) and **macOS**
   (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap.

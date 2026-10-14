@@ -70,6 +70,8 @@ export interface ISession extends mongoose.Document {
   editLastOutcome: "approved" | "rejected" | "denied" | "timeout" | "cancelled" | null;
   createdAt: Date;
   expiresAt: Date;
+  // Set when the session ends; MongoDB deletes the record at this time.
+  purgeAt: Date | null;
 }
 
 const BlobSchema = new Schema<StoredBlob>(
@@ -134,7 +136,11 @@ const SessionSchema = new Schema<ISession>({
   },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true, index: true },
+  purgeAt: { type: Date, default: null },
 });
+
+// TTL: MongoDB removes ended sessions once purgeAt passes.
+SessionSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Session: Model<ISession> =
   (models.Session as Model<ISession>) ?? model<ISession>("Session", SessionSchema);

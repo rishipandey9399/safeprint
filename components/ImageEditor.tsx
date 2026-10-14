@@ -192,6 +192,10 @@ export default function ImageEditor({ pages, watermark, busy, onSubmit, onCancel
     let disposed = false;
     (async () => {
       const f = await import("fabric");
+      // Fabric 7 defaults objects to a centre origin; this editor positions
+      // everything (crop box, shapes, text, page images) by its top-left.
+      f.FabricObject.ownDefaults.originX = "left";
+      f.FabricObject.ownDefaults.originY = "top";
       if (disposed || !elRef.current) return;
       fabricRef.current = f;
       const canvas = new f.Canvas(elRef.current, {

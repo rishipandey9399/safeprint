@@ -8,7 +8,12 @@ import { findVerifiedSession } from "@/lib/shopAuth";
 import { editView } from "@/lib/sessionView";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
 
+import { BodyTooLargeError, readLimitedFormData } from "@/lib/body";
+
 export const runtime = "nodejs";
+
+// Room for multipart boundaries and the other form fields.
+const MULTIPART_OVERHEAD = 256 * 1024;
 
 const MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 // A page at print resolution is ~10 MP; this leaves room for big scans while
@@ -51,8 +56,11 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let form: FormData;
   try {
-    form = await req.formData();
-  } catch {
+    form = await readLimitedFormData(req, MAX_TOTAL_BYTES + MULTIPART_OVERHEAD);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: "Edited pages are too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Expected multipart form data." }, { status: 400 });
   }
   const pages = form.getAll("page").filter((p): p is File => p instanceof File);

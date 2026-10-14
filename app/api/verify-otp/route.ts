@@ -6,17 +6,27 @@ import { finalizeSession, isExpired, isOtpExpired, resolveStaleApproval } from "
 import { findShopByKey } from "@/lib/shopAuth";
 import { sessionShopName, viewerPayload } from "@/lib/sessionView";
 import { logAudit } from "@/lib/audit";
-import { rateLimit, getClientIp } from "@/lib/rateLimit";
+import { isLimited, rateLimit, getClientIp } from "@/lib/rateLimit";
 import { Session } from "@/models/Session";
 
 export const runtime = "nodejs";
 
-const NOT_FOUND = { error: "Invalid code, or session already used/expired." };
+/**
+ * One answer for every failure a stranger could probe — unknown code, a
+ * session paired with another counter, wrong OTP, expired OTP or session,
+ * lockout — so this endpoint can't be used to discover which share codes are
+ * live. Only a counter presenting the paired device key gets specific messages
+ * for its own sessions.
+ */
+const FAIL = { error: "Wrong code or OTP." };
+const fail = () => NextResponse.json(FAIL, { status: 401 });
+const BUSY = { error: "Too many attempts. Wait a minute and try again." };
+const MISS_KEY = "verify-miss:global";
 
 export async function POST(req: Request): Promise<NextResponse> {
   const ip = getClientIp(req);
   if (!(await rateLimit(`verify:${ip}`, 15, 60 * 1000))) {
-    return NextResponse.json({ error: "Too many attempts. Wait a minute." }, { status: 429 });
+    return NextResponse.json(BUSY, { status: 429 });
   }
 
   let body: { shareCode?: string; otp?: string };
@@ -33,6 +43,23 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   await connectDb();
+  const shop = await findShopByKey(req);
+
+  // Service-wide brake on guessing: past the miss budget, requests without a
+  // counter key wait. Scanning share codes then takes days per hit, and the
+  // worst an attacker achieves is a short pause for unpaired counters — not
+  // destroyed documents. Registered counters are never braked.
+  if (!shop && (await isLimited(MISS_KEY, config.verifyGlobalMissesPerMinute, 60 * 1000))) {
+    return NextResponse.json(BUSY, { status: 429 });
+  }
+  // Per share code, independent of IP: slows any attack focused on one target.
+  if (!(await rateLimit(`verify-code:${shareCode}`, config.verifyPerCodePerMinute, 60 * 1000))) {
+    return NextResponse.json(BUSY, { status: 429 });
+  }
+  const miss = async () => {
+    if (!shop) await rateLimit(MISS_KEY, Number.MAX_SAFE_INTEGER, 60 * 1000);
+    return fail();
+  };
 
   const candidate = await Session.findOne({
     shareCode,
@@ -41,28 +68,25 @@ export async function POST(req: Request): Promise<NextResponse> {
   // A citizen who never answered the Allow prompt frees the session again.
   if (candidate) await resolveStaleApproval(candidate);
   const session = candidate?.status === "awaiting_otp" ? candidate : null;
-  if (!session) {
-    // Deliberately vague: no oracle for which codes exist.
-    return NextResponse.json(NOT_FOUND, { status: 404 });
-  }
+  if (!session) return miss();
 
   // A session paired with a counter opens only from that counter's device.
-  const shop = await findShopByKey(req);
-  if (session.shopId && !(shop && shop._id.equals(session.shopId))) {
-    return NextResponse.json(NOT_FOUND, { status: 404 });
-  }
+  const ownCounter = !!(shop && session.shopId && shop._id.equals(session.shopId));
+  if (session.shopId && !ownCounter) return miss();
 
   if (isExpired(session)) {
     await finalizeSession(session, "expired", "session_expired", ip);
-    return NextResponse.json({ error: "This session has expired." }, { status: 410 });
+    return ownCounter ? NextResponse.json({ error: "This session has expired." }, { status: 410 }) : miss();
   }
 
   // Not counted as a wrong attempt — the OTP was right once, just stale.
   if (isOtpExpired(session)) {
-    return NextResponse.json(
-      { error: "This OTP has expired. Ask the customer to tap Regenerate and read you the new one." },
-      { status: 410 }
-    );
+    return ownCounter
+      ? NextResponse.json(
+          { error: "This OTP has expired. Ask the customer to tap Regenerate and read you the new one." },
+          { status: 410 }
+        )
+      : miss();
   }
 
   if (!timingSafeEqualHex(hmacOtp(otp), session.otpHash)) {
@@ -72,11 +96,11 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (session.otpAttempts >= config.maxOtpAttempts) {
       await finalizeSession(session, "locked", "session_locked", ip);
-      return NextResponse.json(
-        { error: "Too many wrong OTPs. Session locked and document deleted." },
-        { status: 423 }
-      );
+      return ownCounter
+        ? NextResponse.json({ error: "Too many wrong OTPs. Session locked and document deleted." }, { status: 423 })
+        : miss();
     }
+    if (!ownCounter) return miss();
     const left = config.maxOtpAttempts - session.otpAttempts;
     return NextResponse.json({ error: `Wrong OTP. ${left} attempt(s) left.` }, { status: 401 });
   }

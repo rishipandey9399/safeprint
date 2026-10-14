@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models, type Model } from "mongoose";
+import { config } from "@/lib/config";
 
 export type AuditEvent =
   | "upload"
@@ -41,6 +42,10 @@ const AuditLogSchema = new Schema<IAuditLog>({
   at: { type: Date, default: Date.now },
   meta: { type: Schema.Types.Mixed, default: {} },
 });
+
+// TTL: audit entries (which carry client IPs) expire after the retention period.
+// Changing AUDIT_RETENTION_DAYS later needs a collMod on this index.
+AuditLogSchema.index({ at: 1 }, { expireAfterSeconds: config.auditRetentionDays * 86400 });
 
 export const AuditLog: Model<IAuditLog> =
   (models.AuditLog as Model<IAuditLog>) ?? model<IAuditLog>("AuditLog", AuditLogSchema);

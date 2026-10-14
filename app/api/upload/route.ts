@@ -14,7 +14,12 @@ import { Session } from "@/models/Session";
 import { Shop, shopLabel } from "@/models/Shop";
 import crypto from "crypto";
 
+import { BodyTooLargeError, readLimitedFormData } from "@/lib/body";
+
 export const runtime = "nodejs";
+
+// Room for multipart boundaries and the other form fields.
+const MULTIPART_OVERHEAD = 256 * 1024;
 
 export async function POST(req: Request): Promise<NextResponse> {
   const ip = getClientIp(req);
@@ -24,8 +29,11 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let form: FormData;
   try {
-    form = await req.formData();
-  } catch {
+    form = await readLimitedFormData(req, config.maxFileBytes + MULTIPART_OVERHEAD);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: "File too large (max 15 MB)." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Expected multipart form data." }, { status: 400 });
   }
 
@@ -136,7 +144,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   await session.save();
 
   await logAudit(session._id as never, "upload", ip, {
-    fileName: session.fileName,
+    // Type and size only — file names (often a person's name) stay out of logs.
+    ext: (session.fileName.match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? "").toLowerCase(),
     size: file.size,
     shopId: shop?._id ?? null,
   });
@@ -155,6 +164,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     expiresAt: expiresAt.toISOString(),
     otpExpiresAt: session.otpExpiresAt!.toISOString(),
     shopName: shop ? shopLabel(shop) : null,
+    shopCode: shop?.shopCode ?? null,
     convertedFrom: sniffed.kind === "word" ? sniffed.ext : null,
   });
 }

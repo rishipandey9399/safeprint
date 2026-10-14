@@ -71,7 +71,7 @@ function counterFile() {
 function loadCounter() {
   try {
     const c = JSON.parse(fs.readFileSync(counterFile(), "utf8"));
-    if (c && c.server && /^[a-f0-9]{64}$/.test(c.deviceKey) && c.shopCode) return c;
+    if (c && parseServer(c.server) && /^[a-f0-9]{64}$/.test(c.deviceKey) && c.shopCode) return c;
   } catch {
     /* not registered yet */
   }
@@ -102,9 +102,14 @@ async function publicCounterInfo() {
   };
 }
 
+// The device key, viewer token and document bytes travel to this server, so
+// it must be HTTPS. Plain HTTP is allowed only for a server on this machine.
 function parseServer(server) {
   try {
-    return new URL(server).origin;
+    const url = new URL(server);
+    const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return null;
+    return url.origin;
   } catch {
     return null;
   }
@@ -156,7 +161,7 @@ ipcMain.handle("counter-info", () => publicCounterInfo());
 
 ipcMain.handle("register-counter", async (_e, { server, name, area }) => {
   const base = parseServer(server);
-  if (!base) return { ok: false, error: "Enter a valid server URL (e.g. https://safeprint.example.com)." };
+  if (!base) return { ok: false, error: "Enter the server's https:// address (e.g. https://safeprint.example.com)." };
   const res = await fetch(new URL("/api/shops/register", base), {
     method: "POST",
     headers: { ...CLIENT_HEADER, "Content-Type": "application/json" },
@@ -228,7 +233,7 @@ ipcMain.handle("cancel-approval", () => {
 ipcMain.handle("verify", async (_e, { server, code, otp }) => {
   const base = counter && !server ? counter.server : parseServer(server);
   if (!base) {
-    return { ok: false, error: "Enter a valid server URL (e.g. https://safeprint.example.com)." };
+    return { ok: false, error: "Enter the server's https:// address (e.g. https://safeprint.example.com)." };
   }
   state.serverUrl = base;
   const res = await api("/api/verify-otp", {

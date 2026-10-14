@@ -43,6 +43,11 @@ export async function finalizeSession(
   session.editStatus = "none";
   session.editRequestedAt = null;
 
+  // Nothing identifying outlives the document: the name goes now, the
+  // scrubbed record itself after the retention period (TTL on purgeAt).
+  session.fileName = DELETED_NAME;
+  session.purgeAt = new Date(Date.now() + config.sessionRetentionDays * 86400 * 1000);
+
   session.status = status;
   session.wrappedKey = "";
   session.keyIv = "";
@@ -56,6 +61,8 @@ export async function finalizeSession(
   await logAudit(session._id as never, event, ip);
   await logAudit(session._id as never, "file_deleted", ip);
 }
+
+export const DELETED_NAME = "[deleted]";
 
 export function isExpired(session: ISession): boolean {
   return session.expiresAt.getTime() <= Date.now();
@@ -156,6 +163,17 @@ export async function sweepExpiredSessions(): Promise<number> {
     editRequestedAt: { $lte: new Date(Date.now() - config.approvalTimeoutSeconds * 1000) },
   });
   for (const session of editRequests) await resolveStaleEditRequest(session);
+
+  // Backfill: ended sessions from before retention existed get scrubbed too.
+  await Session.updateMany(
+    { status: { $in: FINAL_STATUSES }, purgeAt: null },
+    {
+      $set: {
+        fileName: DELETED_NAME,
+        purgeAt: new Date(Date.now() + config.sessionRetentionDays * 86400 * 1000),
+      },
+    }
+  );
 
   // Backstop: forgotten Document Server copies (failed saves) never expire.
   await purgeForgotten();

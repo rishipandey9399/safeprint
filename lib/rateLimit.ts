@@ -14,8 +14,24 @@ const globalWithBuckets = global as typeof globalThis & {
 };
 const buckets = (globalWithBuckets._rateBuckets ??= new Map<string, number[]>());
 
+// Keys can be attacker-chosen (e.g. guessed share codes), so idle buckets are
+// swept periodically rather than kept forever.
+let callsSinceSweep = 0;
+const SWEEP_EVERY = 1000;
+const MAX_WINDOW_MS = 60 * 60 * 1000;
+
+function sweepIdleBuckets(now: number) {
+  for (const [k, hits] of buckets) {
+    if (!hits.length || now - hits[hits.length - 1] > MAX_WINDOW_MS) buckets.delete(k);
+  }
+}
+
 export function memoryRateLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
+  if (++callsSinceSweep >= SWEEP_EVERY) {
+    callsSinceSweep = 0;
+    sweepIdleBuckets(now);
+  }
   const hits = (buckets.get(key) ?? []).filter((t) => now - t < windowMs);
   if (hits.length >= max) {
     buckets.set(key, hits);
@@ -63,8 +79,41 @@ export async function rateLimit(key: string, max: number, windowMs: number): Pro
   }
 }
 
+/**
+ * True when `key` has already used up `max` hits in the current window —
+ * without counting a hit. For brakes that trip on failures only.
+ */
+export async function isLimited(key: string, max: number, windowMs: number): Promise<boolean> {
+  const redis = await getRedis();
+  if (redis) {
+    try {
+      const count = Number(await redis.get(`safeprint:rl:${key}:${Math.floor(Date.now() / windowMs)}`)) || 0;
+      return count >= max;
+    } catch {
+      /* fall through to memory */
+    }
+  }
+  const now = Date.now();
+  return (buckets.get(key) ?? []).filter((t) => now - t < windowMs).length >= max;
+}
+
+/**
+ * The client's IP as seen by OUR proxy. X-Forwarded-For is a list the
+ * client can pre-fill; each trusted proxy appends the address it received
+ * the request from. So the only trustworthy entry is the one our outermost
+ * proxy appended: counted `TRUST_PROXY_HOPS` from the right (default 1 —
+ * one nginx / load balancer in front). The leftmost entry is attacker-chosen
+ * and must never be used. With 0 hops (no proxy) the header is ignored
+ * entirely; route handlers can't see the socket address, so every client
+ * then shares one bucket — run behind a proxy in production.
+ */
 export function getClientIp(req: Request): string {
+  const hops = config.trustProxyHops;
   const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "local";
+  if (hops > 0 && fwd) {
+    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+    const ip = parts[Math.max(0, parts.length - hops)];
+    if (ip) return ip.slice(0, 64);
+  }
+  return "direct";
 }

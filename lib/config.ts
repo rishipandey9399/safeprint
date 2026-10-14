@@ -19,6 +19,16 @@ if (isProduction && !isBuildPhase && !process.env.MASTER_KEY) {
   );
 }
 
+// The Word editor's script runs inside the shop's page, so the Document
+// Server must be reached over TLS in production (localhost aside, for testing).
+if (isProduction && !isBuildPhase && process.env.ONLYOFFICE_URL) {
+  const u = new URL(process.env.ONLYOFFICE_URL);
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !local) {
+    throw new Error("ONLYOFFICE_URL must use https:// in production.");
+  }
+}
+
 const masterKey = process.env.MASTER_KEY
   ? Buffer.from(process.env.MASTER_KEY, "hex")
   : DEV_MASTER_KEY;
@@ -58,6 +68,18 @@ export const config = {
   // How the Document Server reaches this app (server-to-server); defaults to
   // the public URL the request came in on.
   internalBaseUrl: (process.env.SAFEPRINT_INTERNAL_URL ?? "").replace(/\/+$/, ""),
+  // How many proxies in front of the app append to X-Forwarded-For (see
+  // getClientIp). 1 = a single nginx / load balancer; 0 = none.
+  // Failed OTP checks per minute across the whole service (requests without a
+  // counter key) before unpaired verification pauses — stops share-code scanning.
+  verifyGlobalMissesPerMinute: parseInt(process.env.VERIFY_GLOBAL_MISS_LIMIT ?? "300", 10),
+  // OTP checks per minute against any single share code, whatever the IP.
+  verifyPerCodePerMinute: 5,
+  // Ended sessions keep a scrubbed record (no file name) this long, then are
+  // deleted by a TTL index; audit entries likewise. Days.
+  sessionRetentionDays: Math.max(1, parseInt(process.env.SESSION_RETENTION_DAYS ?? "30", 10) || 30),
+  auditRetentionDays: Math.max(1, parseInt(process.env.AUDIT_RETENTION_DAYS ?? "90", 10) || 90),
+  trustProxyHops: Math.max(0, parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10) || 0),
   // Word conversions at once per app process, how many more may wait, and for how long.
   wordConversionConcurrency: Math.max(1, parseInt(process.env.WORD_CONVERSION_CONCURRENCY ?? "2", 10)),
   wordConversionQueue: Math.max(0, parseInt(process.env.WORD_CONVERSION_QUEUE ?? "10", 10)),

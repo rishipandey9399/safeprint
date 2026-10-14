@@ -1,5 +1,6 @@
 import { connectDb } from "@/lib/db";
 import { findOwnerSession } from "@/lib/shopAuth";
+import { getClientIp, rateLimit } from "@/lib/rateLimit";
 import { ownerStatus } from "@/lib/sessionView";
 import { FINAL_STATUSES } from "@/models/Session";
 
@@ -14,12 +15,35 @@ const MAX_STREAM_MS = 5 * 60 * 1000; // client reconnects after this
  * fetch() (not EventSource) so the owner token can ride in the
  * Authorization header instead of a URL.
  */
+// Each open stream polls the database every second, so they're capped:
+// a few per session (a phone with a reconnect in flight) and per client.
+const MAX_STREAMS_PER_SESSION = 3;
+const globalWithStreams = global as typeof globalThis & { _openStreams?: Map<string, number> };
+const openStreams = (globalWithStreams._openStreams ??= new Map<string, number>());
+
 export async function GET(req: Request): Promise<Response> {
+  if (!(await rateLimit(`status-stream:${getClientIp(req)}`, 30, 60 * 1000))) {
+    return Response.json({ error: "Too many requests." }, { status: 429 });
+  }
   await connectDb();
   const first = await findOwnerSession(req);
   if (!first) {
     return Response.json({ error: "Session not found." }, { status: 404 });
   }
+  const sid = String(first._id);
+  if ((openStreams.get(sid) ?? 0) >= MAX_STREAMS_PER_SESSION) {
+    // The client falls back to polling /api/status.
+    return Response.json({ error: "Too many open streams." }, { status: 429 });
+  }
+  openStreams.set(sid, (openStreams.get(sid) ?? 0) + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const n = (openStreams.get(sid) ?? 1) - 1;
+    if (n > 0) openStreams.set(sid, n);
+    else openStreams.delete(sid);
+  };
 
   const encoder = new TextEncoder();
   const started = Date.now();
@@ -49,6 +73,7 @@ export async function GET(req: Request): Promise<Response> {
         } catch {
           // fall through and close; the client reconnects or polls
         }
+        release();
         try {
           controller.close();
         } catch {
@@ -59,6 +84,7 @@ export async function GET(req: Request): Promise<Response> {
     },
     cancel() {
       if (timer) clearTimeout(timer);
+      release();
     },
   });
 
