@@ -39,6 +39,8 @@ same without ever getting a downloadable or editable copy to keep:
   millimetre, shrink / fit to paper, choose A4 / Letter / Legal, print in black & white, skip pages.
   Pages can't be enlarged past the paper; a layout that pushes content off the sheet is flagged on
   screen and recorded in the audit log (`offPaper`). Changing what a page says needs **Edit**.
+  Mixed portrait/landscape documents print the way a printer handles them: one sheet orientation
+  for the job, with pages running the other way turned 90° on the sheet instead of shrunk.
 - **Edit** (customer consent required, twice):
   1. Operator taps **Edit** → the citizen's phone asks *"Sharma Xerox wants to EDIT your
      document — Allow / Deny"* (auto-denied after 2 minutes).
@@ -96,6 +98,9 @@ extra. To customize, copy `.env.example` to `.env`:
 | `ONLYOFFICE_JWT_SECRET` | — | Shared secret; must equal the Document Server's `JWT_SECRET` |
 | `SAFEPRINT_INTERNAL_URL` | request origin | How the Document Server reaches this app server-to-server |
 | `EDIT_TTL_EXTENSION_SECONDS` | `900` | One-time session extension when the citizen allows an edit |
+| `WORD_CONVERSION_CONCURRENCY` | `2` | Word conversions running at once (per app process) |
+| `WORD_CONVERSION_QUEUE` | `10` | Further Word uploads allowed to wait; beyond that they get **503 "busy, try again"** |
+| `WORD_CONVERSION_WAIT_MS` | `20000` | How long a waiting Word upload waits for a slot before getting 503 |
 
 ## Security model
 
@@ -152,7 +157,17 @@ print or 30 minutes.
 Editing widens what the operator sees, unavoidably: while editing as Word the document's text is
 live in the operator's browser (copy is disabled, but devtools can read it), and the Document
 Server holds a working copy in its cache until it expires — `deploy/onlyoffice/local-production-linux.json`
-shortens that from 24 hours to 30 minutes; run the Document Server on infrastructure you control.
+shortens that from 24 hours to 30 minutes (verified against ONLYOFFICE 8.3: the server loads this
+file and deletes cached documents on schedule). Two more safeguards close the gaps the cache
+expiry doesn't cover:
+- When a Word edit round or the session ends, SafePrint tells the Document Server to disconnect
+  the editor (`drop`) — an editor left open after the session expired goes read-only and can't
+  reload the file — and the shop's screen closes itself.
+- If a save callback ever fails, ONLYOFFICE keeps the document as a "forgotten" file that **never
+  expires**. SafePrint deletes this session's forgotten copies when a round or the session ends,
+  and the cleanup sweep removes any SafePrint forgotten copy (`sp…` keys only) every minute.
+
+Run the Document Server on infrastructure you control.
 That is why editing needs the citizen's Allow first and their approval of the result after.
 
 ## What's mocked vs production-ready

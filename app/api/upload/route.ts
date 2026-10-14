@@ -5,7 +5,7 @@ import { encryptFile, generateShareCode, generateToken, hashToken } from "@/lib/
 import { getStorage } from "@/lib/storage";
 import { deleteBlob, storeBlob } from "@/lib/blobs";
 import { sniffFile } from "@/lib/fileType";
-import { appBaseUrl, convertToPdf, fileUrlFor } from "@/lib/onlyoffice";
+import { appBaseUrl, ConversionBusyError, convertToPdf, fileUrlFor } from "@/lib/onlyoffice";
 import type { StoredBlob } from "@/models/Session";
 import { issueOtp } from "@/lib/lifecycle";
 import { logAudit } from "@/lib/audit";
@@ -83,8 +83,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     try {
       bytes = await convertToPdf(fileUrlFor(appBaseUrl(req), source, sniffed.ext), sniffed.ext);
     } catch (err) {
-      console.error("[SafePrint] Word conversion failed:", err);
       await deleteBlob(source);
+      if (err instanceof ConversionBusyError) {
+        return NextResponse.json(
+          { error: "The print server is busy converting Word files — try again in a minute." },
+          { status: 503, headers: { "Retry-After": "30" } }
+        );
+      }
+      console.error("[SafePrint] Word conversion failed:", err);
       return NextResponse.json(
         { error: "Couldn't open this Word file. Save it as PDF and upload that instead." },
         { status: 422 }

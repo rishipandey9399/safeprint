@@ -2,6 +2,7 @@ import { config } from "./config";
 import { logAudit } from "./audit";
 import { deleteBlob, storeBlob } from "./blobs";
 import { getStorage } from "./storage";
+import { releaseWordDocument } from "./onlyoffice";
 import { Session, type ISession, type StoredBlob } from "@/models/Session";
 
 /**
@@ -52,6 +53,7 @@ export async function approveEdit(session: ISession, ip = ""): Promise<void> {
   const edited = session.edited!;
   const oldFileKey = session.fileKey;
   const replacedSourceKey = session.editedSource ? (session.source?.key ?? null) : null;
+  if (session.editKind === "word") void releaseWordDocument(session);
 
   session.fileKey = edited.key;
   session.wrappedKey = edited.wrappedKey;

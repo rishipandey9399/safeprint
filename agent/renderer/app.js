@@ -4,7 +4,15 @@
  * and the session token never enters this process.
  */
 import * as pdfjsLib from "./vendor/pdf.min.mjs";
-import { composePage, defaultAdjust, isDefault, isOffPaper, rotatedSize } from "./vendor/pageAdjust.js";
+import {
+  composePage,
+  defaultAdjust,
+  isDefault,
+  isOffPaper,
+  layout as placeOnPaper,
+  sheetPlan,
+  turnedCopy,
+} from "./vendor/pageAdjust.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 
@@ -285,11 +293,36 @@ function renderLayoutPanel() {
 /** Paper + orientation for the silent print job (one setting per document). */
 function printPageSetup() {
   const paper = layout[0]?.paper ?? "auto";
-  const first = layout.findIndex((a) => a.include);
-  if (paper === "auto" || first < 0) return { paper: "auto", landscape: false };
-  const p = pristine[first];
-  const [w, h] = rotatedSize(p.widthMm, p.heightMm, layout[first].rotate);
-  return { paper, landscape: w > h };
+  const printing = printingPages();
+  const plan = sheetPlan(printing.map((p) => p.size));
+  return { paper, landscape: plan.landscape, plan, printing };
+}
+
+function printingPages() {
+  return layout.flatMap((a, i) =>
+    a.include ? [{ index: i, size: placeOnPaper([pristine[i].widthMm, pristine[i].heightMm], a).paperMm }] : []
+  );
+}
+
+// Pages running against the sheet are printed turned 90° (as a printer
+// would), via print-only copies that exist just for the job.
+let printCopies = [];
+function addPrintCopies({ plan, printing }) {
+  removePrintCopies();
+  const shown = [...$("stack").querySelectorAll("canvas")];
+  printing.forEach(({ index }, k) => {
+    if (!plan.rotate[k] || !shown[index]) return;
+    const copy = turnedCopy(shown[index], document);
+    copy.classList.add("print-only");
+    shown[index].classList.add("screen-only");
+    shown[index].after(copy);
+    printCopies.push(copy);
+  });
+}
+function removePrintCopies() {
+  for (const c of printCopies) blank(c);
+  printCopies = [];
+  for (const c of $("stack").querySelectorAll("canvas.screen-only")) c.classList.remove("screen-only");
 }
 
 $("layout-btn").addEventListener("click", () => {
@@ -434,12 +467,20 @@ $("print-btn").addEventListener("click", async () => {
       verr.hidden = false;
       return;
     }
-    const result = await window.agent.print({
-      printerName: $("printer-select").value,
-      layout,
-      pageMm: pristine.map((p) => [p.widthMm, p.heightMm]),
-      ...printPageSetup(),
-    });
+    const setup = printPageSetup();
+    addPrintCopies(setup);
+    let result;
+    try {
+      result = await window.agent.print({
+        printerName: $("printer-select").value,
+        layout,
+        pageMm: pristine.map((p) => [p.widthMm, p.heightMm]),
+        paper: setup.paper,
+        landscape: setup.landscape,
+      });
+    } finally {
+      removePrintCopies();
+    }
     if (!result.ok) {
       verr.textContent = result.error;
       verr.hidden = false;

@@ -58,6 +58,10 @@ export const config = {
   // How the Document Server reaches this app (server-to-server); defaults to
   // the public URL the request came in on.
   internalBaseUrl: (process.env.SAFEPRINT_INTERNAL_URL ?? "").replace(/\/+$/, ""),
+  // Word conversions at once per app process, how many more may wait, and for how long.
+  wordConversionConcurrency: Math.max(1, parseInt(process.env.WORD_CONVERSION_CONCURRENCY ?? "2", 10)),
+  wordConversionQueue: Math.max(0, parseInt(process.env.WORD_CONVERSION_QUEUE ?? "10", 10)),
+  wordConversionWaitMs: parseInt(process.env.WORD_CONVERSION_WAIT_MS ?? "20000", 10),
 };
 
 export function wordEditingEnabled(): boolean {

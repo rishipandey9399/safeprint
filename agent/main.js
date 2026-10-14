@@ -297,9 +297,10 @@ ipcMain.handle("print", async (e, { printerName, layout, pageMm, paper, landscap
         silent: true,
         deviceName: printerName,
         printBackground: true,
-        ...(PRINT_PAPERS.has(paper)
-          ? { pageSize: paper, landscape: landscape === true, margins: { marginType: "none" } }
-          : {}),
+        // One sheet orientation per job; the renderer turns pages that run
+        // the other way, so they print full-size instead of shrunk.
+        landscape: landscape === true,
+        ...(PRINT_PAPERS.has(paper) ? { pageSize: paper, margins: { marginType: "none" } } : {}),
       },
       (success, failureReason) => resolve({ success, failureReason })
     );

@@ -19,6 +19,10 @@ process.env.MONGODB_URI = (process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27017
 );
 process.env.LOCAL_STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "safeprint-edit-test-"));
 process.env.ONLYOFFICE_JWT_SECRET = JWT_SECRET;
+// Small limits so the busy path is reachable: 1 running + 1 waiting.
+process.env.WORD_CONVERSION_CONCURRENCY = "1";
+process.env.WORD_CONVERSION_QUEUE = "1";
+process.env.WORD_CONVERSION_WAIT_MS = "10000";
 delete process.env.SAFEPRINT_AUTO_APPROVE;
 delete process.env.REDIS_URL;
 
@@ -69,6 +73,10 @@ let mongoUp = false;
 // Fake Document Server: ConvertService fetches the source (as the real one
 // does, with its JWT) and returns a URL to a "converted" PDF.
 const fetchedSources: Buffer[] = [];
+let convertDelayMs = 0;
+// CommandService calls the app made, and the "forgotten" copies it holds.
+const dsCommands: Array<Record<string, unknown>> = [];
+let forgotten: string[] = [];
 const dsServer = http.createServer(async (rq, rs) => {
   const chunks: Buffer[] = [];
   for await (const c of rq) chunks.push(c as Buffer);
@@ -76,11 +84,25 @@ const dsServer = http.createServer(async (rq, rs) => {
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     const payload = oo.verifyJwt(body.token, JWT_SECRET);
     if (!payload) return rs.writeHead(403).end();
+    if (convertDelayMs) await new Promise((r) => setTimeout(r, convertDelayMs));
     const src = await fetch(payload.url, { headers: { Authorization: `Bearer ${oo.signJwt({ payload: { url: payload.url } })}` } });
     if (!src.ok) return rs.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ error: -4 }));
     fetchedSources.push(Buffer.from(await src.arrayBuffer()));
     rs.writeHead(200, { "Content-Type": "application/json" });
     return rs.end(JSON.stringify({ endConvert: true, percent: 100, fileUrl: `${dsBase}/cache/converted.pdf` }));
+  }
+  if (rq.url === "/coauthoring/CommandService.ashx") {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const cmd = oo.verifyJwt(body.token, JWT_SECRET);
+    if (!cmd) return rs.writeHead(403).end();
+    dsCommands.push(cmd);
+    const reply = (o: object) => rs.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(o));
+    if (cmd.c === "getForgottenList") return reply({ error: 0, keys: forgotten });
+    if (cmd.c === "deleteForgotten") {
+      forgotten = forgotten.filter((k) => k !== cmd.key);
+      return reply({ error: 0, key: cmd.key });
+    }
+    return reply({ error: 0, key: cmd.key });
   }
   if (rq.url === "/cache/converted.pdf") return rs.writeHead(200).end(CONVERTED_PDF);
   if (rq.url === "/cache/edited.docx") return rs.writeHead(200).end(EDITED_DOCX);
@@ -375,6 +397,50 @@ describe("shop-side editing", () => {
     // A print attempt without a body still works and logs no layout.
     const plain = await printAttempt(req("/api/print-attempt", { method: "POST", headers: shop(s) }));
     assert.equal(plain.status, 200);
+  });
+
+  test("Word conversions are limited; overflow gets 503 and leaves nothing stored", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const blobsBefore = fs.readdirSync(process.env.LOCAL_STORE_DIR!).length;
+    convertDelayMs = 400;
+    try {
+      const uploadDocx = () => {
+        const form = new FormData();
+        form.append("file", new File([new Uint8Array(DOCX)], "x.docx"));
+        return upload(req("/api/upload", { method: "POST", body: form }));
+      };
+      const results = await Promise.all([uploadDocx(), uploadDocx(), uploadDocx(), uploadDocx()]);
+      const codes = results.map((r: Response) => r.status).sort();
+      assert.deepEqual(codes, [200, 200, 503, 503], "1 converting + 1 waiting; the rest are told to retry");
+      const busy = results.find((r: Response) => r.status === 503)!;
+      assert.equal(busy.headers.get("retry-after"), "30");
+      assert.match((await busy.json()).error, /busy/);
+      // Each accepted upload stores its Word source + PDF; refused ones store nothing.
+      assert.equal(fs.readdirSync(process.env.LOCAL_STORE_DIR!).length - blobsBefore, 4);
+    } finally {
+      convertDelayMs = 0;
+    }
+  });
+
+  test("ending a Word round disconnects the editor and deletes only that session's forgotten copies", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const s = await openSession(DOCX, "lease.docx");
+    const sid = String((await doc(s))._id);
+    await editRequest(req("/api/edit/request", json({ kind: "word" }, shop(s))));
+    await editDecision(req("/api/edit/decision", json({ decision: "allow" }, citizen(s))));
+    forgotten = [`sp${sid}r0`, "spSOMEONEELSEr0", "not-ours"];
+    dsCommands.length = 0;
+
+    assert.equal((await editCancel(req("/api/edit/cancel", { method: "POST", headers: shop(s) }))).status, 200);
+    // Release is fire-and-forget so it never delays the user; wait for it.
+    for (let i = 0; i < 50 && forgotten.includes(`sp${sid}r0`); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(dsCommands.some((c) => c.c === "drop" && c.key === `sp${sid}r0`), "editor disconnected");
+    assert.deepEqual(forgotten, ["spSOMEONEELSEr0", "not-ours"], "only this session's copy deleted");
+
+    // The cleanup sweep is the backstop: it removes every SafePrint forgotten copy, nothing else.
+    const { sweepExpiredSessions } = await import("@/lib/lifecycle");
+    await sweepExpiredSessions();
+    assert.deepEqual(forgotten, ["not-ours"]);
   });
 
   test("Word upload is refused cleanly when no Document Server is configured", async (t) => {

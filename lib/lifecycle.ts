@@ -3,6 +3,7 @@ import { config } from "./config";
 import { generateOtp, hmacOtp } from "./crypto";
 import { logAudit } from "./audit";
 import { deleteBlob } from "./blobs";
+import { purgeForgotten, releaseWordDocument } from "./onlyoffice";
 import { Session, type ISession, type SessionStatus, FINAL_STATUSES } from "@/models/Session";
 import type { AuditEvent } from "@/models/AuditLog";
 
@@ -27,6 +28,10 @@ export async function finalizeSession(
     // Keys are still blanked below, so the blob is unreadable regardless;
     // the storage lifecycle rule / cleanup dir is the physical backstop.
   }
+
+  // A Word edit may still be open on the Document Server: disconnect it and
+  // drop any forgotten copy. Fire-and-forget — never delays the deletion here.
+  if (session.editKind === "word") void releaseWordDocument(session);
 
   // Original Word source and any unreviewed edit go with it.
   await deleteBlob(session.source);
@@ -104,6 +109,7 @@ export async function cancelEdit(
   event: "edit_denied" | "edit_timeout" | "edit_cancelled" | "edit_rejected",
   ip = ""
 ): Promise<void> {
+  if (session.editKind === "word") void releaseWordDocument(session);
   await deleteBlob(session.edited);
   await deleteBlob(session.editedSource);
   session.edited = null;
@@ -150,6 +156,9 @@ export async function sweepExpiredSessions(): Promise<number> {
     editRequestedAt: { $lte: new Date(Date.now() - config.approvalTimeoutSeconds * 1000) },
   });
   for (const session of editRequests) await resolveStaleEditRequest(session);
+
+  // Backstop: forgotten Document Server copies (failed saves) never expire.
+  await purgeForgotten();
 
   return stale.length;
 }

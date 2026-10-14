@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampAdjust, defaultAdjust, isDefault, isOffPaper, layout, rotatedSize, summarizeAdjust } from "@/lib/pageAdjust";
+import { clampAdjust, defaultAdjust, isDefault, isOffPaper, layout, rotatedSize, sheetPlan, summarizeAdjust } from "@/lib/pageAdjust";
 
 test("clampAdjust bounds untrusted input", () => {
   assert.deepEqual(clampAdjust(null), defaultAdjust());
@@ -49,4 +49,13 @@ test("isOffPaper flags content pushed off the sheet", () => {
   assert.equal(isOffPaper([215.9, 355.6], { ...defaultAdjust(), paper: "A4", fit: "actual" }), true);
   const s = summarizeAdjust([{ ...defaultAdjust(), paper: "A4", offsetXmm: 5 }], [a4]);
   assert.deepEqual(s?.offPaper, [1]);
+});
+
+test("sheetPlan: one sheet orientation per job, opposite pages turned", () => {
+  const P: [number, number] = [210, 297];
+  const L: [number, number] = [297, 210];
+  assert.deepEqual(sheetPlan([P, P]), { landscape: false, rotate: [false, false] });
+  assert.deepEqual(sheetPlan([L, L]), { landscape: true, rotate: [false, false] });
+  assert.deepEqual(sheetPlan([P, L, P]), { landscape: false, rotate: [false, true, false] });
+  assert.deepEqual(sheetPlan([]), { landscape: false, rotate: [] });
 });

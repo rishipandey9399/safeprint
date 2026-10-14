@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { config } from "./config";
+import { config, wordEditingEnabled } from "./config";
 import type { ISession, StoredBlob } from "@/models/Session";
 
 /**
@@ -166,9 +166,53 @@ export async function downloadFromDocServer(url: string): Promise<Buffer> {
 // ---------------------------------------------------------------------------
 
 export class ConversionError extends Error {}
+/** Too many conversions are running or waiting; the caller should ask the user to retry. */
+export class ConversionBusyError extends ConversionError {}
+
+// In-process limiter: a burst of Word uploads can't pile unbounded work onto
+// the Document Server or hold unbounded requests open here. Per app process.
+let running = 0;
+const waiting: Array<() => void> = [];
+
+async function acquireConversionSlot(): Promise<void> {
+  if (running < config.wordConversionConcurrency) {
+    running++;
+    return;
+  }
+  if (waiting.length >= config.wordConversionQueue) {
+    throw new ConversionBusyError("Too many Word conversions in progress.");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const grant = () => {
+      clearTimeout(timer);
+      running++;
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      const i = waiting.indexOf(grant);
+      if (i >= 0) waiting.splice(i, 1);
+      reject(new ConversionBusyError("Timed out waiting for a Word conversion slot."));
+    }, config.wordConversionWaitMs);
+    waiting.push(grant);
+  });
+}
+
+function releaseConversionSlot(): void {
+  running--;
+  waiting.shift()?.();
+}
 
 /** Converts the document at `sourceUrl` (reachable by the Document Server) to PDF. */
 export async function convertToPdf(sourceUrl: string, ext: string, title = "document"): Promise<Buffer> {
+  await acquireConversionSlot();
+  try {
+    return await runConversion(sourceUrl, ext, title);
+  } finally {
+    releaseConversionSlot();
+  }
+}
+
+async function runConversion(sourceUrl: string, ext: string, title: string): Promise<Buffer> {
   const payload = {
     async: false,
     filetype: ext,
@@ -200,17 +244,60 @@ export async function convertToPdf(sourceUrl: string, ext: string, title = "docu
  * Returns false when there is nothing to save (no changes were made).
  */
 export async function forceSave(docKey: string): Promise<boolean> {
-  const payload = { c: "forcesave", key: docKey };
+  const data = await command({ c: "forcesave", key: docKey });
+  if (data.error === 0) return true;
+  if (data.error === 4) return false; // document not modified
+  throw new Error(`Force save failed (${data.error}).`);
+}
+
+async function command(payload: Record<string, unknown>, timeoutMs = 15_000): Promise<{ error?: number; keys?: unknown }> {
   const res = await fetch(`${config.onlyofficeUrl}/coauthoring/CommandService.ashx`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, token: signJwt(payload) }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: number };
-  if (data.error === 0) return true;
-  if (data.error === 4) return false; // document not modified
-  throw new Error(`Force save failed (${data.error ?? res.status}).`);
+  return (await res.json().catch(() => ({ error: res.status }))) as { error?: number; keys?: unknown };
+}
+
+const SESSION_KEY_PREFIX = "sp";
+
+/**
+ * Deletes "forgotten" documents — copies the Document Server keeps, with no
+ * expiry, when an editor closed and its save callback failed. Only keys this
+ * app created (`sp…`) are touched; with `sessionId`, only that session's.
+ * Best-effort: returns how many were deleted, 0 on any failure.
+ */
+export async function purgeForgotten(sessionId?: string): Promise<number> {
+  if (!wordEditingEnabled()) return 0;
+  const prefix = sessionId ? `${SESSION_KEY_PREFIX}${sessionId}r` : SESSION_KEY_PREFIX;
+  try {
+    const list = await command({ c: "getForgottenList" }, 5_000);
+    const keys = Array.isArray(list.keys) ? list.keys.filter((k): k is string => typeof k === "string" && k.startsWith(prefix)) : [];
+    let deleted = 0;
+    for (const key of keys) {
+      if ((await command({ c: "deleteForgotten", key }, 5_000)).error === 0) deleted++;
+    }
+    return deleted;
+  } catch (err) {
+    console.error("[SafePrint] purging forgotten Document Server copies failed:", err);
+    return 0;
+  }
+}
+
+/**
+ * A Word edit round is over (approved, rejected, cancelled, or the session
+ * ended): disconnect the editor so the Document Server stops holding the
+ * document open, then delete any forgotten copy of this session. Best-effort.
+ */
+export async function releaseWordDocument(session: ISession, round = session.editRounds): Promise<void> {
+  if (!wordEditingEnabled() || !session.source) return;
+  try {
+    await command({ c: "drop", key: `${SESSION_KEY_PREFIX}${String(session._id)}r${round}`, users: ["shop"] }, 5_000);
+  } catch (err) {
+    console.error("[SafePrint] disconnecting the Word editor failed:", err);
+  }
+  await purgeForgotten(String(session._id));
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +311,7 @@ export interface CallbackRef {
 
 /** Document key: unique per session + edit round so no cached copy is reused across rounds. */
 export function docKeyFor(session: ISession): string {
-  return `sp${String(session._id)}r${session.editRounds}`;
+  return `${SESSION_KEY_PREFIX}${String(session._id)}r${session.editRounds}`;
 }
 
 // The Document Server fetches the source once when the editor opens.

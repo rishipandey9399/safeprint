@@ -1284,6 +1284,11 @@ html {
   cursor: default;
 }
 
+/* turned copies exist only for the printout */
+.canvas-stack canvas.print-only {
+  display: none;
+}
+
 /* skipped pages: dimmed on the desk, absent from the printout */
 .canvas-stack canvas.no-print {
   opacity: 0.3;
@@ -1449,7 +1454,15 @@ html {
     box-shadow: none !important;
     outline: none !important;
     opacity: 1 !important;
+    max-height: 100vh !important;
+    object-fit: contain;
     page-break-after: always;
+  }
+  .print-area canvas.screen-only {
+    display: none !important;
+  }
+  .print-area canvas.print-only {
+    display: block !important;
   }
   /* a chosen paper size: each page canvas is exactly one sheet */
   .print-area[data-paper] canvas {

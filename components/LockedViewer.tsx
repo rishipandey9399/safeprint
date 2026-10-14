@@ -9,8 +9,10 @@ import {
   defaultAdjust,
   isDefault,
   isOffPaper,
+  layout as placeOnPaper,
   MAX_SCALE,
-  rotatedSize,
+  sheetPlan,
+  turnedCopy,
   type Adjust,
   type Paper,
 } from "@/lib/pageAdjust";
@@ -230,12 +232,24 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
 
   // Lock down the page while the viewer is mounted.
   useEffect(() => {
+    // Text the operator types in the photo editor (Fabric's hidden textarea,
+    // or the editor's own fields) may be selected, copied and pasted — it is
+    // the operator's own text, never document pixels. Everything else stays
+    // locked, and save/print/view-source stay blocked everywhere.
+    const inEditorText = (t: EventTarget | null) =>
+      t instanceof HTMLElement && (t.dataset.fabric === "textarea" || !!t.closest(".image-editor"));
     const block = (e: Event) => e.preventDefault();
+    const blockUnlessEditorText = (e: Event) => {
+      if (!inEditorText(e.target)) e.preventDefault();
+    };
     const keydown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && ["s", "p", "c", "x", "u", "a"].includes(e.key.toLowerCase())) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (["c", "x", "a"].includes(key) && inEditorText(e.target)) return;
+      if (["s", "p", "c", "x", "u", "a"].includes(key)) {
         e.preventDefault();
         e.stopPropagation();
-        if (e.key.toLowerCase() === "p") {
+        if (key === "p") {
           setNotice("Use the Print button below — it is the only allowed print path.");
         } else {
           setNotice("Saving and copying are disabled in SafePrint.");
@@ -244,15 +258,15 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
     };
     document.addEventListener("contextmenu", block);
     document.addEventListener("dragstart", block);
-    document.addEventListener("copy", block);
-    document.addEventListener("cut", block);
+    document.addEventListener("copy", blockUnlessEditorText);
+    document.addEventListener("cut", blockUnlessEditorText);
     document.addEventListener("keydown", keydown, true);
     window.addEventListener("pagehide", beaconClose);
     return () => {
       document.removeEventListener("contextmenu", block);
       document.removeEventListener("dragstart", block);
-      document.removeEventListener("copy", block);
-      document.removeEventListener("cut", block);
+      document.removeEventListener("copy", blockUnlessEditorText);
+      document.removeEventListener("cut", blockUnlessEditorText);
       document.removeEventListener("keydown", keydown, true);
       window.removeEventListener("pagehide", beaconClose);
     };
@@ -293,15 +307,39 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
   // Paper is one setting for the whole document (one @page rule).
   const setPaper = (p: Paper) => setLayout((cur) => cur.map((a) => ({ ...a, paper: p })));
 
-  // Orientation for the @page rule: from the first page that will print.
-  const firstIncluded = layout.findIndex((a) => a.include);
-  const firstPage = pristineRef.current[firstIncluded];
-  const landscape =
-    !!firstPage &&
-    (() => {
-      const [w, h] = rotatedSize(firstPage.widthMm, firstPage.heightMm, layout[firstIncluded].rotate);
-      return w > h;
-    })();
+  // One sheet orientation for the job; pages running the other way are
+  // printed turned 90° (see sheetPlan) rather than shrunk.
+  const printing = layout.flatMap((a, i) => {
+    const p = pristineRef.current[i];
+    return p && a.include ? [{ index: i, size: placeOnPaper([p.widthMm, p.heightMm], a).paperMm }] : [];
+  });
+  const plan = sheetPlan(printing.map((p) => p.size));
+  const sheetOrientation = plan.landscape ? "landscape" : "portrait";
+
+  // Print-only turned copies, inserted just before the dialog opens.
+  const printCopiesRef = useRef<HTMLCanvasElement[]>([]);
+  const removePrintCopies = useCallback(() => {
+    wipe(printCopiesRef.current);
+    printCopiesRef.current = [];
+    composedRef.current.forEach((c) => c.classList.remove("screen-only"));
+  }, []);
+  const addPrintCopies = () => {
+    removePrintCopies();
+    printing.forEach(({ index }, k) => {
+      if (!plan.rotate[k]) return;
+      const shown = composedRef.current[index];
+      if (!shown) return;
+      const copy = turnedCopy(shown, document);
+      copy.classList.add("print-only");
+      shown.classList.add("screen-only");
+      shown.after(copy);
+      printCopiesRef.current.push(copy);
+    });
+  };
+  useEffect(() => {
+    window.addEventListener("afterprint", removePrintCopies);
+    return () => window.removeEventListener("afterprint", removePrintCopies);
+  }, [removePrintCopies]);
 
   // ---------------------------------------------------------------------------
   // Print
@@ -329,6 +367,7 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
       setAttemptsLeft(data.attemptsLeft);
       // Give the browser a beat to settle, then open the native print dialog.
       setTimeout(() => {
+        addPrintCopies();
         window.print();
         setConfirmOpen(true); // afterprint isn't reliable everywhere; ask explicitly
       }, 100);
@@ -338,6 +377,7 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
   };
 
   const confirmPrinted = async () => {
+    removePrintCopies();
     setBusy(true);
     try {
       const res = await fetch("/api/confirm-print", { method: "POST", headers: auth });
@@ -356,6 +396,7 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
   };
 
   const printFailed = () => {
+    removePrintCopies();
     setConfirmOpen(false);
     if (attemptsLeft <= 0) {
       beaconClose();
@@ -411,17 +452,29 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
 
   // Poll while waiting on the customer (or the Document Server's save).
   useEffect(() => {
-    if (!editPhase || editPhase === "choose" || editPhase === "image") return;
+    // While editing too: notices if the session ends under the editor.
+    if (!editPhase || editPhase === "choose") return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       try {
         const res = await fetch("/api/edit/status", { headers: auth, cache: "no-store" });
+        if (res.status === 403 && !stopped) {
+          // The session ended (expired, or closed elsewhere) while editing:
+          // take the editor and every page off this screen.
+          stopped = true;
+          endedRef.current = true;
+          setWordEditor(null);
+          setEditPhase(null);
+          wipeCanvases();
+          onEnded("ended", "This session has ended and the customer's file was deleted.");
+          return;
+        }
         if (res.ok && !stopped) applyEditInfo(await res.json(), editPhase);
       } catch {
         /* transient — keep polling */
       }
-      if (!stopped) timer = setTimeout(tick, editPhase === "word" ? 5000 : 2000);
+      if (!stopped) timer = setTimeout(tick, editPhase === "word" || editPhase === "image" ? 5000 : 2000);
     };
     void tick();
     return () => {
@@ -517,9 +570,11 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
 
   return (
     <div className="locked-viewer">
-      {paper !== "auto" && (
-        <style media="print">{`@page { size: ${paper} ${landscape ? "landscape" : "portrait"}; margin: 0; }`}</style>
-      )}
+      <style media="print">
+        {paper === "auto"
+          ? `@page { size: ${sheetOrientation}; }`
+          : `@page { size: ${paper} ${sheetOrientation}; margin: 0; }`}
+      </style>
 
       <div className="viewer-toolbar">
         <span className="doc-name">{session.fileName}</span>
