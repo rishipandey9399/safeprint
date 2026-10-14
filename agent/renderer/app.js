@@ -8,12 +8,109 @@ import * as pdfjsLib from "./vendor/pdf.min.mjs";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 
 const $ = (id) => document.getElementById(id);
-const screens = { connect: $("connect-screen"), viewer: $("viewer-screen"), done: $("done-screen") };
+const screens = {
+  setup: $("setup-screen"),
+  counter: $("counter-screen"),
+  waiting: $("waiting-screen"),
+  connect: $("connect-screen"),
+  viewer: $("viewer-screen"),
+  done: $("done-screen"),
+};
 
 let attemptsLeft = 2;
+let counterInfo = { registered: false };
+let selectedJob = null;
+let jobsTimer = null;
 
 function show(name) {
   for (const [key, el] of Object.entries(screens)) el.hidden = key !== name;
+  if (name === "counter") startJobsPolling();
+  else stopJobsPolling();
+}
+
+function showError(id, message) {
+  const el = $(id);
+  el.textContent = message || "";
+  el.hidden = !message;
+}
+
+// ---------------------------------------------------------------------------
+// Counter: QR, job queue, OTP-only entry
+// ---------------------------------------------------------------------------
+function renderCounter() {
+  $("counter-name").textContent = counterInfo.name;
+  $("counter-area").textContent = counterInfo.area || "";
+  $("counter-code").textContent = counterInfo.shopCode;
+  const qr = $("counter-qr");
+  qr.textContent = "";
+  // SVG text comes from our own main process (qrcode lib), parsed — not
+  // innerHTML'd — and only the <svg> element is adopted.
+  const svg = new DOMParser().parseFromString(counterInfo.qrSvg || "", "image/svg+xml").documentElement;
+  if (svg && svg.nodeName === "svg") qr.appendChild(document.importNode(svg, true));
+}
+
+function timeOf(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderJobs(jobs) {
+  const list = $("job-list");
+  list.textContent = "";
+  $("jobs-empty").hidden = jobs.length > 0;
+  if (selectedJob && !jobs.some((j) => j.shareCode === selectedJob)) selectedJob = null;
+  for (const job of jobs) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.className = "job" + (job.shareCode === selectedJob ? " selected" : "");
+    const name = document.createElement("span");
+    name.className = "job-name";
+    name.textContent = job.fileName;
+    const meta = document.createElement("span");
+    meta.className = "job-meta";
+    meta.textContent =
+      `${timeOf(job.createdAt)} · SP·${job.shareCode}` +
+      (job.status === "awaiting_approval" ? " · waiting for customer" : "");
+    btn.append(name, meta);
+    btn.addEventListener("click", () => {
+      selectedJob = job.shareCode;
+      $("job-otp-input").value = "";
+      renderJobs(jobs);
+      $("job-otp-input").focus();
+    });
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+  $("job-otp").hidden = !selectedJob;
+}
+
+async function loadJobs() {
+  const result = await window.agent.jobs();
+  if (result.unregistered) {
+    counterInfo = { registered: false };
+    showError("setup-error", result.error);
+    show("setup");
+    return;
+  }
+  if (!result.ok) {
+    showError("jobs-error", result.error);
+  } else {
+    showError("jobs-error", "");
+    renderJobs(result.jobs);
+  }
+  if (!screens.counter.hidden) jobsTimer = setTimeout(loadJobs, 3000);
+}
+
+function startJobsPolling() {
+  stopJobsPolling();
+  void loadJobs();
+}
+function stopJobsPolling() {
+  if (jobsTimer) clearTimeout(jobsTimer);
+  jobsTimer = null;
+}
+
+function home() {
+  show(counterInfo.registered ? "counter" : "connect");
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +193,16 @@ function finish(kind, message) {
 // Flow
 // ---------------------------------------------------------------------------
 async function verifyAndOpen(server, code, otp) {
-  const result = await window.agent.verify({ server, code, otp });
+  let result = await window.agent.verify({ server, code, otp });
   if (!result.ok) return result;
+
+  if (result.pendingApproval) {
+    $("waiting-note").textContent =
+      `Their phone shows “${result.shopName || "A shop"} wants to open your document”.`;
+    show("waiting");
+    result = await window.agent.awaitApproval();
+    if (!result.ok) return result;
+  }
 
   attemptsLeft = result.printAttemptsLeft;
   $("doc-name").textContent = result.fileName;
@@ -113,19 +218,70 @@ async function verifyAndOpen(server, code, otp) {
 }
 
 $("verify-btn").addEventListener("click", async () => {
-  const err = $("connect-error");
-  err.hidden = true;
+  showError("connect-error", "");
   $("verify-btn").disabled = true;
   try {
     const result = await verifyAndOpen($("server").value.trim(), $("code").value.trim(), $("otp").value.trim());
     if (!result.ok) {
-      err.textContent = result.error;
-      err.hidden = false;
+      show("connect");
+      showError("connect-error", result.error);
     }
   } finally {
     $("verify-btn").disabled = false;
   }
 });
+
+$("job-open-btn").addEventListener("click", async () => {
+  if (!selectedJob) return;
+  showError("counter-error", "");
+  $("job-open-btn").disabled = true;
+  try {
+    const result = await verifyAndOpen("", selectedJob, $("job-otp-input").value.trim());
+    if (!result.ok) {
+      show("counter");
+      showError("counter-error", result.error);
+    }
+  } finally {
+    $("job-open-btn").disabled = false;
+  }
+});
+$("job-otp-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("job-open-btn").click();
+});
+
+$("setup-btn").addEventListener("click", async () => {
+  showError("setup-error", "");
+  $("setup-btn").disabled = true;
+  try {
+    const result = await window.agent.registerCounter({
+      server: $("setup-server").value.trim(),
+      name: $("setup-name").value.trim(),
+      area: $("setup-area").value.trim(),
+    });
+    if (!result.ok) {
+      showError("setup-error", result.error);
+      return;
+    }
+    counterInfo = result;
+    renderCounter();
+    show("counter");
+  } finally {
+    $("setup-btn").disabled = false;
+  }
+});
+
+$("setup-skip").addEventListener("click", () => show("connect"));
+$("manual-btn").addEventListener("click", () => {
+  $("server").value = counterInfo.server || $("server").value;
+  show("connect");
+});
+$("connect-back").addEventListener("click", () => show(counterInfo.registered ? "counter" : "setup"));
+$("forget-btn").addEventListener("click", async () => {
+  await window.agent.forgetCounter();
+  counterInfo = { registered: false };
+  show("setup");
+});
+$("waiting-cancel").addEventListener("click", () => window.agent.cancelApproval());
 
 $("print-btn").addEventListener("click", async () => {
   const verr = $("viewer-error");
@@ -177,7 +333,8 @@ $("close-btn").addEventListener("click", async () => {
 $("again-btn").addEventListener("click", () => {
   $("code").value = "";
   $("otp").value = "";
-  show("connect");
+  selectedJob = null;
+  home();
 });
 
 // ---------------------------------------------------------------------------
@@ -185,8 +342,22 @@ $("again-btn").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 (async () => {
   const cfg = await window.agent.launchConfig();
-  if (cfg.server) $("server").value = cfg.server;
-  if (!cfg.selftest) return;
+  if (cfg.server) {
+    $("server").value = cfg.server;
+    $("setup-server").value = cfg.server;
+  }
+  if (cfg.selftest) {
+    show("connect");
+  } else {
+    counterInfo = await window.agent.counterInfo();
+    if (counterInfo.registered) {
+      renderCounter();
+      show("counter");
+    } else {
+      show("setup");
+    }
+    return;
+  }
 
   const report = { ok: false, steps: {} };
   try {
@@ -216,10 +387,22 @@ $("again-btn").addEventListener("click", () => {
 
     await window.agent.closeSession();
     report.steps.sessionClose = "pass";
+
+    // Counter pairing: register, QR, job queue, forget.
+    const reg = await window.agent.registerCounter({ server: cfg.server, name: "Selftest Counter", area: "" });
+    report.steps.counterRegister =
+      reg.ok && /^[A-Z2-9]{6}$/.test(reg.shopCode) ? "pass" : `fail: ${reg.error || "bad shop code"}`;
+    report.steps.counterQr = (reg.qrSvg || "").includes("<svg") ? "pass" : "fail";
+    const jobs = await window.agent.jobs();
+    report.steps.counterJobs = jobs.ok && Array.isArray(jobs.jobs) ? "pass" : `fail: ${jobs.error}`;
+    await window.agent.forgetCounter();
+    report.steps.counterForget = (await window.agent.counterInfo()).registered ? "fail" : "pass";
+
     report.ok =
       report.steps.modalHiddenAtLaunch === "pass" &&
       report.steps.render.startsWith("pass") &&
-      report.steps.spoofRejected === "pass";
+      report.steps.spoofRejected === "pass" &&
+      ["counterRegister", "counterQr", "counterJobs", "counterForget"].every((k) => report.steps[k] === "pass");
   } catch (err) {
     report.error = String(err && err.message ? err.message : err);
   }

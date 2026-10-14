@@ -1206,3 +1206,220 @@ html {
     right: 10px;
   }
 }
+
+/* =========================================================================
+   Counter pairing, approval & OTP controls
+   ========================================================================= */
+.link-btn {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 6px 0;
+  min-height: 32px;
+  font-family: var(--form);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--stamp-deep);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.link-btn:hover {
+  color: var(--stamp-press);
+}
+.link-btn:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.code-box .link-btn {
+  margin-top: 4px;
+}
+
+.inline-field {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.inline-field input {
+  flex: 1;
+  min-width: 0;
+}
+.btn.inline {
+  width: auto;
+  margin-top: 0;
+  padding: 0 18px;
+}
+.field-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.shop-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #eef4e4;
+  border: 1.5px solid var(--ok);
+  border-radius: var(--radius);
+}
+.shop-chip strong {
+  display: block;
+  color: var(--ink);
+}
+.shop-chip-code {
+  font-family: var(--form);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+.shop-chip .link-btn {
+  margin-top: 0;
+}
+
+.code-row.single::before,
+.code-row.single::after {
+  display: none;
+}
+.code-box.expired .code-value {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.approval {
+  margin: 4px 0 20px;
+  padding: 18px 18px 16px;
+  background: var(--stamp-soft);
+  border: 2px solid var(--stamp-deep);
+  border-radius: var(--radius);
+  animation: approval-pulse 1.6s ease-in-out infinite;
+}
+.approval h3 {
+  font-family: var(--form);
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.approval p {
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+.approval .row {
+  display: flex;
+  gap: 12px;
+}
+@keyframes approval-pulse {
+  50% {
+    box-shadow: 0 0 0 5px rgba(178, 62, 29, 0.18);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .approval {
+    animation: none;
+  }
+}
+
+.counter-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 760px) {
+  .counter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.counter-qr {
+  text-align: center;
+}
+.qr {
+  margin: 14px auto 10px;
+  max-width: 240px;
+  aspect-ratio: 1;
+  background: #fffdf7;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.counter-qr .code-label {
+  font-family: var(--form);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--muted);
+}
+.counter-code {
+  font-family: var(--form);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--stamp-deep);
+}
+
+.job-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.job {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  padding: 10px 14px;
+  background: #fffdf7;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.job:hover {
+  border-color: var(--stamp-deep);
+}
+.job.selected {
+  border-color: var(--stamp-deep);
+  background: var(--stamp-soft);
+}
+.job:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.job-name {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-meta {
+  font-family: var(--form);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.code-row.single .code-box {
+  border-right: none;
+}
+.status-line.ok + .btn,
+.status-line.bad + .btn {
+  margin-top: 16px;
+}
+.card > .status-line {
+  margin-top: 16px;
+}

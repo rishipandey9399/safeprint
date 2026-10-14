@@ -1,20 +1,15 @@
 import { getStorage } from "./storage";
-import { getOtpProvider } from "./otp";
+import { config } from "./config";
+import { generateOtp, hmacOtp } from "./crypto";
 import { logAudit } from "./audit";
 import { Session, type ISession, type SessionStatus, FINAL_STATUSES } from "@/models/Session";
 import type { AuditEvent } from "@/models/AuditLog";
 
-const OUTCOME_MESSAGES: Record<string, string> = {
-  printed: "Your document was printed and has been permanently deleted from SafePrint.",
-  closed: "The shop closed the viewer without printing. Your document has been permanently deleted.",
-  locked: "Too many wrong OTP entries. Your document was permanently deleted without being viewed.",
-  expired: "Your SafePrint session expired. The document was permanently deleted without being printed.",
-};
-
 /**
  * The ONLY place a session reaches a final state. Deletes the stored blob,
  * blanks the encryption keys in Mongo (crypto-shredding — even a surviving
- * blob copy is unreadable), audits, and notifies the uploader.
+ * blob copy is unreadable) and audits. The uploader's app learns the outcome
+ * from its live status stream.
  */
 export async function finalizeSession(
   session: ISession,
@@ -39,25 +34,74 @@ export async function finalizeSession(
   session.fileIv = "";
   session.fileTag = "";
   session.viewerTokenHash = null;
+  session.approvalRequestedAt = null;
   await session.save();
 
   await logAudit(session._id as never, event, ip);
   await logAudit(session._id as never, "file_deleted", ip);
-  await getOtpProvider().notify(session.phone, OUTCOME_MESSAGES[status]);
 }
 
 export function isExpired(session: ISession): boolean {
   return session.expiresAt.getTime() <= Date.now();
 }
 
+export function isOtpExpired(session: ISession): boolean {
+  return !session.otpExpiresAt || session.otpExpiresAt.getTime() <= Date.now();
+}
+
+/**
+ * Mints a fresh OTP for the session (upload or citizen-requested regenerate):
+ * resets the attempt counter and starts a new OTP lifetime, capped at the
+ * session's own expiry. Returns the plaintext — the ONLY time it exists; it
+ * goes straight to the citizen's screen and is never logged or stored.
+ */
+export function issueOtp(session: ISession): string {
+  const otp = generateOtp();
+  session.otpHash = hmacOtp(otp);
+  session.otpAttempts = 0;
+  session.otpExpiresAt = new Date(
+    Math.min(Date.now() + config.otpTtlSeconds * 1000, session.expiresAt.getTime())
+  );
+  return otp;
+}
+
+/** Drops a pending shop approval: back to waiting for an OTP, viewer token void. */
+export async function revokePendingApproval(
+  session: ISession,
+  event?: "approval_denied" | "approval_timeout",
+  ip = ""
+): Promise<void> {
+  session.status = "awaiting_otp";
+  session.viewerTokenHash = null;
+  session.approvalRequestedAt = null;
+  await session.save();
+  if (event) await logAudit(session._id as never, event, ip);
+}
+
+/** If the citizen didn't answer the Allow prompt in time, revoke it. Returns true if it did. */
+export async function resolveStaleApproval(session: ISession): Promise<boolean> {
+  if (session.status !== "awaiting_approval" || !session.approvalRequestedAt) return false;
+  const age = Date.now() - session.approvalRequestedAt.getTime();
+  if (age < config.approvalTimeoutSeconds * 1000) return false;
+  await revokePendingApproval(session, "approval_timeout");
+  return true;
+}
+
 /** Finalize any sessions whose TTL has passed. Shared by the cleanup job and lazy checks. */
 export async function sweepExpiredSessions(): Promise<number> {
   const stale = await Session.find({
-    status: { $in: ["awaiting_otp", "verified"] },
+    status: { $in: ["awaiting_otp", "awaiting_approval", "verified"] },
     expiresAt: { $lte: new Date() },
   });
   for (const session of stale) {
     await finalizeSession(session, "expired", "session_expired");
   }
+
+  const pending = await Session.find({
+    status: "awaiting_approval",
+    approvalRequestedAt: { $lte: new Date(Date.now() - config.approvalTimeoutSeconds * 1000) },
+  });
+  for (const session of pending) await resolveStaleApproval(session);
+
   return stale.length;
 }

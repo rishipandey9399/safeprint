@@ -14,7 +14,9 @@
  *  - setContentProtection(true): the document window is excluded from
  *    screenshots/screen capture on Windows (SetWindowDisplayAffinity) and
  *    macOS (NSWindowSharingNone). No-op on Linux — documented limitation.
- *  - Decrypted bytes live only in memory; nothing is written to disk.
+ *  - Decrypted bytes live only in memory; nothing is written to disk. The
+ *    only file the agent writes is its counter identity (userData/counter.json:
+ *    server URL, shop code, device key) — never document data.
  *  - Renderer is sandboxed (contextIsolation, no nodeIntegration), all
  *    navigation/new windows/permission requests are denied, Ctrl/Cmd+P/S/C
  *    are intercepted, and there is no application menu to expose Print.
@@ -34,6 +36,11 @@ function argValue(name) {
   return hit ? hit.split("=").slice(1).join("=") : null;
 }
 const SELFTEST = process.argv.includes("--selftest");
+// The selftest registers a throwaway counter — keep it away from a real
+// counter.json by giving the run its own userData directory.
+if (SELFTEST) {
+  app.setPath("userData", path.join(require("os").tmpdir(), `safeprint-selftest-${process.pid}`));
+}
 const LAUNCH = {
   selftest: SELFTEST,
   server: argValue("server") || "",
@@ -52,9 +59,62 @@ const state = {
 
 const CLIENT_HEADER = { "X-SafePrint-Client": `agent/${app.getVersion()}` };
 
+// ---------------------------------------------------------------------------
+// Counter identity: a registered shop's device key. Lives only in the main
+// process (and userData/counter.json); the renderer sees name + code only.
+// ---------------------------------------------------------------------------
+let counter = null; // { server, deviceKey, shopCode, name, area }
+
+function counterFile() {
+  return path.join(app.getPath("userData"), "counter.json");
+}
+function loadCounter() {
+  try {
+    const c = JSON.parse(fs.readFileSync(counterFile(), "utf8"));
+    if (c && c.server && /^[a-f0-9]{64}$/.test(c.deviceKey) && c.shopCode) return c;
+  } catch {
+    /* not registered yet */
+  }
+  return null;
+}
+function saveCounter(c) {
+  if (c) fs.writeFileSync(counterFile(), JSON.stringify(c), { mode: 0o600 });
+  else fs.rmSync(counterFile(), { force: true });
+  counter = c;
+}
+
+async function publicCounterInfo() {
+  if (!counter) return { registered: false };
+  const pairUrl = `${counter.server}/?shop=${counter.shopCode}`;
+  const qrSvg = await QRCode.toString(pairUrl, {
+    type: "svg",
+    margin: 1,
+    color: { dark: "#26211a", light: "#fffdf7" },
+  }).catch(() => "");
+  return {
+    registered: true,
+    server: counter.server,
+    shopCode: counter.shopCode,
+    name: counter.name,
+    area: counter.area,
+    pairUrl,
+    qrSvg,
+  };
+}
+
+function parseServer(server) {
+  try {
+    return new URL(server).origin;
+  } catch {
+    return null;
+  }
+}
+
 async function api(pathname, { method = "GET", body, auth = false } = {}) {
   const headers = { ...CLIENT_HEADER };
   if (auth) headers.Authorization = `Bearer ${state.viewerToken}`;
+  // Paired sessions only open from the counter they were paired with.
+  if (counter && counter.server === state.serverUrl) headers["X-SafePrint-Shop-Key"] = counter.deviceKey;
   if (body) headers["Content-Type"] = "application/json";
   const res = await fetch(new URL(pathname, state.serverUrl), {
     method,
@@ -68,6 +128,7 @@ async function api(pathname, { method = "GET", body, auth = false } = {}) {
 // Physical-printer filtering (pure module — unit-testable with plain Node)
 // ---------------------------------------------------------------------------
 const { splitPrinters } = require("./printer-filter.cjs");
+const QRCode = require("qrcode");
 
 // ---------------------------------------------------------------------------
 // Best-effort session close so an abandoned window still destroys the file.
@@ -91,11 +152,82 @@ async function closeSessionBeacon() {
 // ---------------------------------------------------------------------------
 ipcMain.handle("launch-config", () => LAUNCH);
 
+ipcMain.handle("counter-info", () => publicCounterInfo());
+
+ipcMain.handle("register-counter", async (_e, { server, name, area }) => {
+  const base = parseServer(server);
+  if (!base) return { ok: false, error: "Enter a valid server URL (e.g. https://safeprint.example.com)." };
+  const res = await fetch(new URL("/api/shops/register", base), {
+    method: "POST",
+    headers: { ...CLIENT_HEADER, "Content-Type": "application/json" },
+    body: JSON.stringify({ name, area }),
+  }).catch(() => null);
+  if (!res) return { ok: false, error: "Cannot reach the SafePrint server." };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data.error || `Setup failed (${res.status}).` };
+  saveCounter({ server: base, deviceKey: data.deviceKey, shopCode: data.shopCode, name: data.name, area: data.area });
+  return { ok: true, ...(await publicCounterInfo()) };
+});
+
+ipcMain.handle("forget-counter", () => {
+  saveCounter(null);
+  return { ok: true };
+});
+
+ipcMain.handle("jobs", async () => {
+  if (!counter) return { ok: false, error: "Counter not set up." };
+  const res = await fetch(new URL("/api/shops/jobs", counter.server), {
+    headers: { ...CLIENT_HEADER, "X-SafePrint-Shop-Key": counter.deviceKey },
+  }).catch(() => null);
+  if (!res) return { ok: false, error: "Cannot reach the SafePrint server — retrying…" };
+  if (res.status === 401) {
+    saveCounter(null);
+    return { ok: false, unregistered: true, error: "This counter is no longer registered. Set it up again." };
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data.error || `Could not load jobs (${res.status}).` };
+  // Share codes + file names only; nothing secret crosses to the renderer.
+  return { ok: true, jobs: data.jobs };
+});
+
+// Waits (in the main process, token never leaves) for the customer's Allow.
+ipcMain.handle("await-approval", async () => {
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (state.viewerToken && Date.now() < deadline) {
+    const res = await api("/api/approval-status", { auth: true }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (data.state === "approved") {
+      return {
+        ok: true,
+        fileName: data.fileName,
+        mimeType: data.mimeType,
+        expiresAt: data.expiresAt,
+        printAttemptsLeft: data.printAttemptsLeft,
+      };
+    }
+    if (data.state === "denied") {
+      state.viewerToken = null;
+      return {
+        ok: false,
+        error: "The customer did not allow access (denied or timed out). Ask them for a new OTP.",
+      };
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  state.viewerToken = null;
+  return { ok: false, error: "Stopped waiting for the customer." };
+});
+
+ipcMain.handle("cancel-approval", () => {
+  // Dropping the token is enough: it is useless until approved, and an
+  // unanswered request times out server-side.
+  state.viewerToken = null;
+  return { ok: true };
+});
+
 ipcMain.handle("verify", async (_e, { server, code, otp }) => {
-  let base;
-  try {
-    base = new URL(server).origin;
-  } catch {
+  const base = counter && !server ? counter.server : parseServer(server);
+  if (!base) {
     return { ok: false, error: "Enter a valid server URL (e.g. https://safeprint.example.com)." };
   }
   state.serverUrl = base;
@@ -109,9 +241,13 @@ ipcMain.handle("verify", async (_e, { server, code, otp }) => {
 
   state.viewerToken = data.viewerToken;
   state.finished = false;
+  if (data.pendingApproval) {
+    return { ok: true, pendingApproval: true, shopName: data.shopName || null };
+  }
   // Everything except the token is safe for the renderer.
   return {
     ok: true,
+    pendingApproval: false,
     fileName: data.fileName,
     mimeType: data.mimeType,
     expiresAt: data.expiresAt,
@@ -234,6 +370,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  counter = loadCounter();
   protocol.handle("safeprint-app", (request) => {
     const url = new URL(request.url);
     const rel = path.normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, "");

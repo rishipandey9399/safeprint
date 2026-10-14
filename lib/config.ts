@@ -7,6 +7,18 @@ const DEV_MASTER_KEY = crypto
   .update("safeprint-dev-master-key-do-not-use-in-prod")
   .digest();
 
+const isProduction = process.env.NODE_ENV === "production";
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
+// The dev key is public (it's in this file) — encrypting real documents or
+// keying OTP HMACs with it would be no protection at all.
+if (isProduction && !isBuildPhase && !process.env.MASTER_KEY) {
+  throw new Error(
+    "MASTER_KEY is required in production (64 hex chars). " +
+      `Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+  );
+}
+
 const masterKey = process.env.MASTER_KEY
   ? Buffer.from(process.env.MASTER_KEY, "hex")
   : DEV_MASTER_KEY;
@@ -22,10 +34,17 @@ export const config = {
   storageDriver: process.env.STORAGE_DRIVER ?? "local",
   localStoreDir: process.env.LOCAL_STORE_DIR ?? ".safeprint-store",
   gcsBucket: process.env.GCS_BUCKET ?? "",
+  redisUrl: process.env.REDIS_URL ?? "",
   sessionTtlSeconds: parseInt(process.env.SESSION_TTL_SECONDS ?? "1800", 10),
+  otpTtlSeconds: parseInt(process.env.OTP_TTL_SECONDS ?? "600", 10),
+  approvalTimeoutSeconds: parseInt(process.env.APPROVAL_TIMEOUT_SECONDS ?? "120", 10),
   cleanupIntervalMs: parseInt(process.env.CLEANUP_INTERVAL_MS ?? "60000", 10),
+  // Skips the citizen's Allow tap — for the agent selftest and automated
+  // tests only. Never honoured in production.
+  autoApprove: !isProduction && process.env.SAFEPRINT_AUTO_APPROVE === "1",
   maxFileBytes: 15 * 1024 * 1024,
   maxOtpAttempts: 5,
+  maxOtpRegenerations: 5,
   maxPrintAttempts: 2,
   maxRenderFetches: 20,
 };

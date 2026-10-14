@@ -17,7 +17,7 @@ export const runtime = "nodejs";
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const ip = getClientIp(req);
-  if (!rateLimit(`render:${ip}`, 30, 60 * 1000)) {
+  if (!(await rateLimit(`render:${ip}`, 30, 60 * 1000))) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   }
 
