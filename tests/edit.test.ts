@@ -203,6 +203,7 @@ describe("shop-side editing", () => {
     const rv = await (await editReview(req("/api/edit/review", json({ decision: "approve" }, citizen(s))))).json();
     assert.equal(rv.editStatus, "none");
     assert.equal(rv.editRoundsLeft, 2);
+    assert.equal(rv.editLastOutcome, "approved");
 
     const rendered = await render(req("/api/render", { headers: shop(s) }));
     assert.equal(rendered.status, 200);
@@ -225,6 +226,7 @@ describe("shop-side editing", () => {
 
     const rv = await (await editReview(req("/api/edit/review", json({ decision: "reject" }, citizen(s))))).json();
     assert.equal(rv.editStatus, "none");
+    assert.equal(rv.editLastOutcome, "rejected");
     assert.equal(blobExists(editedKey), false);
     const r = await render(req("/api/render", { headers: shop(s) }));
     assert.deepEqual(Buffer.from(await r.arrayBuffer()), PDF);
@@ -329,6 +331,24 @@ describe("shop-side editing", () => {
     assert.equal(blobExists(original.source.key), false);
     const { readBlob } = await import("@/lib/blobs");
     assert.deepEqual(await readBlob(approved.source), EDITED_DOCX);
+  });
+
+  test("print attempt records the layout used, validated", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const s = await openSession();
+    const layout = [
+      { rotate: 90, offsetXmm: -5, offsetYmm: 0, scalePct: 100, fit: "fit", paper: "A4", include: true, grayscale: false },
+      { rotate: 0, offsetXmm: 999, offsetYmm: 0, scalePct: 100, fit: "fit", paper: "A4", include: false, grayscale: true },
+    ];
+    const r = await printAttempt(req("/api/print-attempt", json({ layout }, shop(s))));
+    assert.equal(r.status, 200);
+    const log = await AuditLog.findOne({ sessionId: (await doc(s))._id, event: "print_attempt" });
+    assert.deepEqual(log.meta.layout.skipped, [2]);
+    assert.equal(log.meta.layout.changed.p1.rotate, 90);
+    assert.equal(log.meta.layout.changed.p2.offsetXmm, 40, "clamped");
+    // A print attempt without a body still works and logs no layout.
+    const plain = await printAttempt(req("/api/print-attempt", { method: "POST", headers: shop(s) }));
+    assert.equal(plain.status, 200);
   });
 
   test("Word upload is refused cleanly when no Document Server is configured", async (t) => {

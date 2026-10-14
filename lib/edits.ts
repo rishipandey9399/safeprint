@@ -2,21 +2,22 @@ import { config } from "./config";
 import { logAudit } from "./audit";
 import { deleteBlob, storeBlob } from "./blobs";
 import { getStorage } from "./storage";
-import { Session, type ISession } from "@/models/Session";
+import { Session, type ISession, type StoredBlob } from "@/models/Session";
 
 /**
- * Stores a shop's edited version and moves the session to pending_review.
+ * Stores a shop's edited version (plus an already-stored edited Word source,
+ * if any) and moves the session to pending_review.
  * The state change is a conditional update, so of two racing submissions
  * (e.g. a Document Server force-save and close callback) only one wins and
  * the loser's blobs are deleted.
  */
 export async function submitEdit(
   session: ISession,
-  edit: { pdf: Buffer; source?: Buffer; sourceExt?: "docx" | "doc"; meta?: Record<string, unknown> },
+  edit: { pdf: Buffer; sourceBlob?: StoredBlob; sourceExt?: "docx" | "doc"; meta?: Record<string, unknown> },
   ip = ""
 ): Promise<boolean> {
   const edited = await storeBlob(edit.pdf);
-  const editedSource = edit.source ? await storeBlob(edit.source) : null;
+  const editedSource = edit.sourceBlob ?? null;
 
   const won = await Session.findOneAndUpdate(
     { _id: session._id, status: "verified", editStatus: "editing", editRounds: session.editRounds },
@@ -70,6 +71,7 @@ export async function approveEdit(session: ISession, ip = ""): Promise<void> {
   session.editKind = null;
   session.editRequestedAt = null;
   session.editRounds += 1;
+  session.editLastOutcome = "approved";
   // Fresh render budget for the new version.
   session.renderCount = 0;
   await session.save();

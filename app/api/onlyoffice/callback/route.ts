@@ -2,8 +2,17 @@ import { NextResponse } from "next/server";
 import { connectDb } from "@/lib/db";
 import { wordEditingEnabled } from "@/lib/config";
 import { submitEdit } from "@/lib/edits";
-import { convertToPdf, downloadFromDocServer, openRef, readDocServerJwt, type CallbackRef } from "@/lib/onlyoffice";
-import { Session } from "@/models/Session";
+import { deleteBlob, storeBlob } from "@/lib/blobs";
+import {
+  appBaseUrl,
+  convertToPdf,
+  downloadFromDocServer,
+  fileUrlFor,
+  openRef,
+  readDocServerJwt,
+  type CallbackRef,
+} from "@/lib/onlyoffice";
+import { Session, type StoredBlob } from "@/models/Session";
 
 export const runtime = "nodejs";
 
@@ -44,12 +53,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     return ok(); // stale round, session over, or already submitted
   }
 
+  // Store the edited file first, then convert it through our own sealed URL
+  // (the result URL the Document Server hands out may only resolve outside it).
+  let sourceBlob: StoredBlob | null = null;
   try {
-    const docx = await downloadFromDocServer(url);
     const ext = typeof body.filetype === "string" && body.filetype === "doc" ? "doc" : "docx";
-    const pdf = await convertToPdf(url, ext, "edited");
-    await submitEdit(session, { pdf, source: docx, sourceExt: ext });
+    sourceBlob = await storeBlob(await downloadFromDocServer(url));
+    const pdf = await convertToPdf(fileUrlFor(appBaseUrl(req), sourceBlob, ext), ext, "edited");
+    const stored = await submitEdit(session, { pdf, sourceBlob, sourceExt: ext });
+    if (!stored) sourceBlob = null; // submitEdit already deleted it
   } catch (err) {
+    await deleteBlob(sourceBlob);
     console.error("[SafePrint] ONLYOFFICE save failed:", err);
     // Non-zero tells the Document Server the save failed; the shop can retry.
     return NextResponse.json({ error: 1 });

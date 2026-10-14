@@ -30,6 +30,30 @@ The OTP works like a ride OTP in Rapido or Uber: it is generated fresh for every
    **permanently deleted** (blob removed + encryption keys blanked) and the citizen's screen
    updates live.
 
+### Fixing a document at the counter
+
+A real shop fixes a badly aligned file before printing it. SafePrint lets the operator do the
+same without ever getting a downloadable or editable copy to keep:
+
+- **Layout** (no permission needed, logged with the print): turn pages, nudge them by the
+  millimetre, scale / fit to paper, choose A4 / Letter / Legal, print in black & white, skip pages.
+  Layout changes how pages sit on paper — never what they say.
+- **Edit** (customer consent required, twice):
+  1. Operator taps **Edit** → the citizen's phone asks *"Sharma Xerox wants to EDIT your
+     document — Allow / Deny"* (auto-denied after 2 minutes).
+  2. After Allow, the operator edits either
+     - **as Word** (uploaded `.docx`/`.doc` files): the real document opens in an embedded
+       ONLYOFFICE editor — fonts, alignment, spacing, text — with *download, print and copy
+       switched off* in the editor's signed permissions, or
+     - **with photo tools** (any PDF/photo/scan): crop, rotate, straighten, perspective-fix a
+       skewed phone photo, brightness/contrast/B&W, *scan cleanup* (whitens paper, removes
+       shadows), whiteout, eraser, pen, text, boxes, lines and arrows — with undo/redo.
+  3. **Send to customer for approval** → the edited version goes to the server (encrypted), never
+     to the operator's disk. The citizen's phone shows exactly what will print → **Approve**
+     makes it the print copy (the old version is shredded) or **Reject** discards it.
+  - Printing is blocked while an edit is open or under review. Max 3 edit rounds per document;
+    the session gets a one-time 15-minute extension when editing is allowed.
+
 Citizens who didn't scan a QR (or shops that never set up a counter) use the fallback: the
 citizen's screen shows a **share code + OTP**, and the operator types both at `/shop`. The Allow
 step still applies.
@@ -47,7 +71,12 @@ npm run dev
 Open <http://localhost:3000/shop> (set up a counter) and the QR/`/?shop=CODE` link in a second
 window (citizen page). The OTP appears **only** on the citizen's screen — it is never logged.
 
-No env vars are required for local dev. To customize, copy `.env.example` to `.env`:
+No env vars are required for local dev (MongoDB only; Word files are refused).
+
+**Word uploads + Word editing** need the ONLYOFFICE Document Server: `docker compose up -d`
+starts it (and MongoDB), then set `ONLYOFFICE_URL`, `ONLYOFFICE_JWT_SECRET` and
+`SAFEPRINT_INTERNAL_URL` as shown in `docker-compose.yml`. The photo/page editor needs nothing
+extra. To customize, copy `.env.example` to `.env`:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -62,6 +91,10 @@ No env vars are required for local dev. To customize, copy `.env.example` to `.e
 | `APPROVAL_TIMEOUT_SECONDS` | `120` | Time the citizen has to tap Allow |
 | `SAFEPRINT_AUTO_APPROVE` | — | `1` skips the Allow tap — dev/tests only, ignored in production |
 | `CLEANUP_INTERVAL_MS` | `60000` | Background sweep cadence |
+| `ONLYOFFICE_URL` | — | ONLYOFFICE Document Server base URL (reachable by browsers **and** this server). Unset = Word uploads refused |
+| `ONLYOFFICE_JWT_SECRET` | — | Shared secret; must equal the Document Server's `JWT_SECRET` |
+| `SAFEPRINT_INTERNAL_URL` | request origin | How the Document Server reaches this app server-to-server |
+| `EDIT_TTL_EXTENSION_SECONDS` | `900` | One-time session extension when the citizen allows an edit |
 
 ## Security model
 
@@ -86,6 +119,17 @@ No env vars are required for local dev. To customize, copy `.env.example` to `.e
   requested/granted/denied/timed out, renders, print attempts, confirmation, deletion, expiry —
   each with timestamp + IP (+ counter id) (`auditlogs` collection).
 
+- **Editing** never gives the shop a file: the image editor works on in-memory canvases and
+  uploads its result straight to `/api/edit/pages`; the Word editor is ONLYOFFICE with download,
+  print and copy disabled by permissions the server signs (the browser can't change them).
+  The Document Server fetches the Word source through `/api/onlyoffice/file` with a sealed
+  (AES-GCM, 5–45 min) reference **and** its own JWT, and posts saves to `/api/onlyoffice/callback`
+  (JWT-verified; results are fetched only from the configured Document Server host). Every
+  version — original, Word source, unreviewed edits — is encrypted like the upload and
+  crypto-shredded when the session ends. Upload and edit rounds are audit-logged
+  (`word_converted`, `edit_requested/granted/denied/timeout/cancelled/submitted/approved/rejected`),
+  and print attempts record the layout used.
+
 ### Honest limitations (MVP, browser-only by design)
 
 A browser cannot stop an operator from choosing **"Save as PDF" inside the native print dialog**,
@@ -99,6 +143,12 @@ Full prevention of the escape path needs the out-of-scope Windows print agent (o
 integration). What this MVP proves is the default-path guarantee: *nothing is downloaded, cached,
 or left on disk in the normal flow*, and the file provably stops existing server-side after one
 print or 30 minutes.
+
+Editing widens what the operator sees, unavoidably: while editing as Word the document's text is
+live in the operator's browser (copy is disabled, but devtools can read it), and the Document
+Server holds a working copy in its cache until it expires — `deploy/onlyoffice/local-production-linux.json`
+shortens that from 24 hours to 30 minutes; run the Document Server on infrastructure you control.
+That is why editing needs the citizen's Allow first and their approval of the result after.
 
 ## What's mocked vs production-ready
 
@@ -115,6 +165,8 @@ print or 30 minutes.
 | Tests | `npm test` — unit + full route flow against local MongoDB; runs in CI (`web-ci.yml`) |
 | HTTPS | Terminate TLS at your proxy/host in production; dev is plain HTTP |
 | Desktop agent (silent physical-only printing, capture blocking) | Real, working — verified end-to-end by `npm run selftest`; installers unsigned until signing keys are added |
+| Word upload (→ PDF) and Word editing | Real, working with a self-hosted ONLYOFFICE Document Server (`docker-compose.yml`) |
+| Photo/page editor, layout tools, edit consent + review | Real, working (browser portal). The agent has the layout tools; editing happens in the browser portal |
 
 ## SafePrint Agent (desktop app — closes the Save-as-PDF hole)
 
@@ -194,7 +246,13 @@ app/
   api/confirm-print     delete file immediately on confirmation
   api/session-close     sendBeacon target for window-close deletion
   api/status(/stream)   citizen's live status (streamed; polling fallback)
-components/LockedViewer.tsx   canvas rendering + input locks + print flow
+  api/edit/*            edit consent + review: request, decision, status, cancel, pages
+                        (photo-editor output → PDF), finish (Word force-save), preview, review
+  api/onlyoffice/*      Document Server only: sealed file fetch + save callback
+components/LockedViewer.tsx   canvas rendering + input locks + layout panel + edit flow + print
+components/ImageEditor.tsx    photo tools (Fabric.js): crop, perspective, cleanup, whiteout, text…
+components/WordEditor.tsx     embedded ONLYOFFICE editor (download/print/copy off)
+components/EditReview.tsx     citizen's preview of the edited version → Approve / Reject
 components/ShopCounter.tsx    counter QR + incoming jobs + OTP entry
 lib/                    crypto, storage adapters, rate limit (Redis/memory), auth helpers,
                         lifecycle (OTP issue/approval/finalize), cleanup job
@@ -214,5 +272,16 @@ invalidates the old OTP → Allow opens the locked viewer → close/print delete
 phone updates via the status stream → owner token in a URL query is refused. The agent selftest
 passes the approval flow plus counter register/QR/jobs/forget. `npm test` covers the same flow,
 OTP expiry (410, no attempt counted), approval timeout, regenerate cap and 5-strike lockout with
-crypto-shredding. Not verified: a real Redis server (the unreachable-Redis fallback is), a real
+crypto-shredding.
+
+Editing, verified in a browser (Playwright, shop window + phone viewport): layout panel → A4,
+nudge, skip a page → print media shows only the included page on A4 with the watermark; photo
+tools → whiteout over an old stamp, text, box, crop, straighten → customer Allow → review on the
+phone → Approve → the edited version renders as the print copy. With a real ONLYOFFICE 8.3
+Document Server: a `.docx` upload converts to PDF; **Edit as Word** opens the editor with no
+Download/Print in its File menu; fixing the indentation/alignment and sending it → the phone shows
+the corrected pages → Approve → the shop prints the corrected version. `npm test` covers the edit
+consent/review state machine, round cap, render/print blocked mid-edit, shredding of every
+version, the Word callback against a fake Document Server, JWT/sealed-reference checks and the
+layout math. Not verified: a real Redis server (the unreachable-Redis fallback is), a real
 30-minute wait, and real GCS.

@@ -19,6 +19,7 @@ export function editView(session: ISession) {
   return {
     editStatus: session.editStatus ?? "none",
     editKind: session.editKind ?? null,
+    editLastOutcome: session.editLastOutcome ?? null,
     editRoundsLeft: Math.max(0, config.maxEditRounds - (session.editRounds ?? 0)),
     wordEditable: wordEditingEnabled() && !!session.source,
     editRequestExpiresAt:

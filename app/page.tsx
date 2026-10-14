@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import EditReview from "@/components/EditReview";
 
 interface ActiveSession {
   shareCode: string;
@@ -33,6 +34,10 @@ interface LiveStatus {
   otpRegenerationsLeft: number;
   shopName: string | null;
   approvalExpiresAt: string | null;
+  expiresAt?: string;
+  editStatus?: "none" | "requested" | "editing" | "pending_review";
+  editKind?: "word" | "image" | null;
+  editRequestExpiresAt?: string | null;
 }
 
 const STATUS_TEXT: Record<Status, { text: string; tone: "" | "ok" | "bad" }> = {
@@ -122,7 +127,7 @@ export default function UploadPage() {
   const upload = useCallback(async () => {
     const file = fileRef.current?.files?.[0];
     if (!file) {
-      setError("Choose a PDF or image first.");
+      setError("Choose a PDF, Word file or image first.");
       return;
     }
     setError("");
@@ -224,12 +229,12 @@ export default function UploadPage() {
     return () => clearInterval(id);
   }, [phase]);
 
-  const decide = async (decision: "allow" | "deny") => {
+  const decide = async (decision: "allow" | "deny", endpoint = "/api/approve") => {
     if (!session) return;
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/approve", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { Authorization: `Bearer ${session.ownerToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ decision }),
@@ -283,11 +288,13 @@ export default function UploadPage() {
     setError("");
   };
 
-  const sessionLeft = session ? new Date(session.expiresAt).getTime() - now : 0;
+  const sessionLeft = session ? new Date(live?.expiresAt ?? session.expiresAt).getTime() - now : 0;
   const otpExpiresAt = live?.otpExpiresAt ?? session?.otpExpiresAt ?? null;
   const otpLeft = otpExpiresAt ? new Date(otpExpiresAt).getTime() - now : 0;
   const otpExpired = !!session && otpLeft <= 0 && !FINAL.includes(status);
   const approvalLeft = live?.approvalExpiresAt ? new Date(live.approvalExpiresAt).getTime() - now : 0;
+  const editStatus = status === "verified" ? (live?.editStatus ?? "none") : "none";
+  const editRequestLeft = live?.editRequestExpiresAt ? new Date(live.editRequestExpiresAt).getTime() - now : 0;
   const wrongAttempts = live ? MAX_OTP_ATTEMPTS - live.otpAttemptsLeft : 0;
   const canRegenerate = status === "awaiting_otp" && (live?.otpRegenerationsLeft ?? 1) > 0;
   const shopName = live?.shopName ?? session?.shopName ?? null;
@@ -348,11 +355,19 @@ export default function UploadPage() {
             </>
           )}
 
-          <label htmlFor="file">Document (PDF, JPG, or PNG — max 15 MB)</label>
-          <input id="file" ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
+          <label htmlFor="file">Document (PDF, Word, JPG, or PNG — max 15 MB)</label>
+          <input
+            id="file"
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
+          />
           <button className="btn" onClick={upload} disabled={phase === "uploading"}>
             {phase === "uploading" ? "Encrypting & issuing OTP…" : "Lock & get OTP"}
           </button>
+          {phase === "uploading" && /\.docx?$/i.test(fileRef.current?.files?.[0]?.name ?? "") && (
+            <p className="hint">Converting your Word file to a print-ready PDF…</p>
+          )}
           {error && <p className="error">{error}</p>}
           <p className="hint">
             Your file is encrypted before it is stored, opens only with the OTP shown on this phone
@@ -395,6 +410,37 @@ export default function UploadPage() {
                 Auto-denied in <strong>{formatRemaining(approvalLeft)}</strong>
               </p>
             </div>
+          )}
+
+          {editStatus === "requested" && (
+            <div className="approval" role="alertdialog" aria-labelledby="edit-title">
+              <h3 id="edit-title">{shopName ?? "The shop"} wants to EDIT your document</h3>
+              <p>
+                {live?.editKind === "word"
+                  ? "They'll fix the Word file (text, alignment, spacing)."
+                  : "They'll fix the pages (crop, straighten, clean up, whiteout, add text)."}{" "}
+                You&apos;ll see every change on this phone and approve it before anything prints.
+              </p>
+              <div className="row">
+                <button className="btn secondary" disabled={busy} onClick={() => decide("deny", "/api/edit/decision")}>
+                  Deny
+                </button>
+                <button className="btn" disabled={busy} onClick={() => decide("allow", "/api/edit/decision")}>
+                  Allow edit
+                </button>
+              </div>
+              <p className="countdown" style={{ margin: "12px 0 0" }}>
+                Auto-denied in <strong>{formatRemaining(editRequestLeft)}</strong>
+              </p>
+            </div>
+          )}
+
+          {editStatus === "pending_review" && (
+            <EditReview
+              ownerToken={session.ownerToken}
+              shopName={shopName}
+              onDecided={(data) => setLive(data as LiveStatus)}
+            />
           )}
 
           {status === "awaiting_otp" && (
@@ -446,7 +492,13 @@ export default function UploadPage() {
               Self-destructs in <strong>{formatRemaining(sessionLeft)}</strong>
             </p>
           )}
-          <div className={`status-line ${STATUS_TEXT[status].tone}`}>{STATUS_TEXT[status].text}</div>
+          <div className={`status-line ${STATUS_TEXT[status].tone}`}>
+            {editStatus === "editing"
+              ? "You allowed editing — the shop is making changes. You'll review them here."
+              : editStatus === "pending_review"
+                ? "Check the shop's changes above, then approve or reject them."
+                : STATUS_TEXT[status].text}
+          </div>
           {error && <p className="error">{error}</p>}
           {FINAL.includes(status) ? (
             <button className="btn secondary" onClick={reset}>

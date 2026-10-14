@@ -66,6 +66,8 @@ export interface ISession extends mongoose.Document {
   editRequestedAt: Date | null;
   editRounds: number;
   editTtlExtended: boolean;
+  // How the last edit round ended, so the shop's screen can say why.
+  editLastOutcome: "approved" | "rejected" | "denied" | "timeout" | "cancelled" | null;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -125,6 +127,11 @@ const SessionSchema = new Schema<ISession>({
   editRequestedAt: { type: Date, default: null },
   editRounds: { type: Number, default: 0 },
   editTtlExtended: { type: Boolean, default: false },
+  editLastOutcome: {
+    type: String,
+    enum: ["approved", "rejected", "denied", "timeout", "cancelled", null],
+    default: null,
+  },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true, index: true },
 });

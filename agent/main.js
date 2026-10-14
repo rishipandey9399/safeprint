@@ -269,7 +269,9 @@ ipcMain.handle("list-printers", async (e) => {
   return splitPrinters(printers);
 });
 
-ipcMain.handle("print", async (e, { printerName }) => {
+const PRINT_PAPERS = new Set(["A4", "Letter", "Legal"]);
+
+ipcMain.handle("print", async (e, { printerName, layout, paper, landscape }) => {
   if (!state.viewerToken) return { ok: false, error: "No active session." };
 
   // Re-validate against the CURRENT printer list — the renderer's choice is
@@ -279,7 +281,10 @@ ipcMain.handle("print", async (e, { printerName }) => {
     return { ok: false, error: "Selected printer is not an approved physical printer." };
   }
 
-  const attempt = await api("/api/print-attempt", { method: "POST", auth: true }).catch(() => null);
+  // Layout is logged server-side (the server re-validates it); the paper
+  // size and orientation become the silent print job's page setup.
+  const body = Array.isArray(layout) && layout.length <= 500 ? { layout } : undefined;
+  const attempt = await api("/api/print-attempt", { method: "POST", auth: true, body }).catch(() => null);
   if (!attempt) return { ok: false, error: "Cannot reach the SafePrint server." };
   const attemptData = await attempt.json().catch(() => ({}));
   if (!attempt.ok) return { ok: false, error: attemptData.error || "Print not allowed." };
@@ -288,7 +293,14 @@ ipcMain.handle("print", async (e, { printerName }) => {
     // silent + deviceName = job goes straight to the spooler for that
     // device. The OS print dialog — and its Save-as-PDF — never opens.
     e.sender.print(
-      { silent: true, deviceName: printerName, printBackground: true },
+      {
+        silent: true,
+        deviceName: printerName,
+        printBackground: true,
+        ...(PRINT_PAPERS.has(paper)
+          ? { pageSize: paper, landscape: landscape === true, margins: { marginType: "none" } }
+          : {}),
+      },
       (success, failureReason) => resolve({ success, failureReason })
     );
   });

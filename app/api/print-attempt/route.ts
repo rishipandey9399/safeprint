@@ -4,6 +4,18 @@ import { config } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { findVerifiedSession } from "@/lib/shopAuth";
 import { getClientIp } from "@/lib/rateLimit";
+import { clampAdjust, summarizeAdjust } from "@/lib/pageAdjust";
+
+/** Optional `{ layout: Adjust[] }` body: the print-layout changes, for the audit log only. */
+async function readLayout(req: Request) {
+  try {
+    const body = (await req.json()) as { layout?: unknown };
+    if (!Array.isArray(body.layout) || body.layout.length > 500) return null;
+    return summarizeAdjust(body.layout.map(clampAdjust));
+  } catch {
+    return null;
+  }
+}
 
 export const runtime = "nodejs";
 
@@ -31,11 +43,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  const layout = await readLayout(req);
   session.printAttempts += 1;
   await session.save();
   await logAudit(session._id as never, "print_attempt", ip, {
     attempt: session.printAttempts,
     client: req.headers.get("x-safeprint-client") ?? "browser",
+    ...(layout ? { layout } : {}),
   });
 
   return NextResponse.json({

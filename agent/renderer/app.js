@@ -4,6 +4,7 @@
  * and the session token never enters this process.
  */
 import * as pdfjsLib from "./vendor/pdf.min.mjs";
+import { composePage, defaultAdjust, isDefault, rotatedSize } from "./vendor/pageAdjust.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 
@@ -127,20 +128,25 @@ for (const evt of ["contextmenu", "dragstart", "copy", "cut"]) {
 // Save-as-PDF path, so copies can't escape the print step — the browser
 // portal, which can't control the print dialog, keeps the watermark instead.
 // ---------------------------------------------------------------------------
-async function renderDocument(bytes, mimeType) {
-  const stack = $("stack");
-  stack.textContent = "";
+const MM_PER_PT = 25.4 / 72;
+// Rendered pages, kept off-DOM so layout can recompose from the original.
+let pristine = []; // { canvas, widthMm, heightMm }
+let layout = []; // one Adjust per page (see vendor/pageAdjust.js)
+let layoutTarget = "all";
 
+async function renderDocument(bytes, mimeType) {
+  wipeCanvases();
   if (mimeType.includes("pdf")) {
     const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
+      const base = page.getViewport({ scale: 1 });
       const viewport = page.getViewport({ scale: 2 });
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-      stack.appendChild(canvas);
+      pristine.push({ canvas, widthMm: base.width * MM_PER_PT, heightMm: base.height * MM_PER_PT });
     }
   } else {
     const bitmap = await createImageBitmap(new Blob([bytes], { type: mimeType }));
@@ -149,15 +155,53 @@ async function renderDocument(bytes, mimeType) {
     canvas.height = bitmap.height;
     canvas.getContext("2d").drawImage(bitmap, 0, 0);
     bitmap.close();
-    stack.appendChild(canvas);
+    // Photos have no physical size: long side on A4's long side.
+    const mmPerPx = 297 / Math.max(canvas.width, canvas.height);
+    pristine.push({ canvas, widthMm: canvas.width * mmPerPx, heightMm: canvas.height * mmPerPx });
   }
+  layout = pristine.map(() => defaultAdjust());
+  layoutTarget = "all";
+  renderLayoutPanel();
+  composeAll();
+}
+
+/** Draws every page with its layout into the (printable) stack. */
+function composeAll() {
+  const stack = $("stack");
+  for (const c of stack.querySelectorAll("canvas")) blank(c);
+  pristine.forEach((p, i) => {
+    const adj = layout[i];
+    let c;
+    if (isDefault(adj)) {
+      c = document.createElement("canvas");
+      c.width = p.canvas.width;
+      c.height = p.canvas.height;
+      c.getContext("2d").drawImage(p.canvas, 0, 0);
+    } else {
+      c = composePage(p.canvas, [p.widthMm, p.heightMm], adj, document);
+    }
+    if (!adj.include) c.classList.add("no-print");
+    stack.appendChild(c);
+  });
+  const paper = layout[0]?.paper ?? "auto";
+  if (paper === "auto") delete stack.dataset.paper;
+  else stack.dataset.paper = paper;
+}
+
+function blank(c) {
+  c.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  c.width = 0;
+  c.height = 0;
+  c.remove();
 }
 
 function wipeCanvases() {
-  for (const c of document.querySelectorAll("#stack canvas")) {
-    c.getContext("2d")?.clearRect(0, 0, c.width, c.height);
-    c.remove();
-  }
+  for (const c of document.querySelectorAll("#stack canvas")) blank(c);
+  for (const p of pristine) blank(p.canvas);
+  pristine = [];
+  layout = [];
+  $("layout-panel").hidden = true;
+  $("layout-btn").setAttribute("aria-expanded", "false");
 }
 
 async function refreshPrinters() {
@@ -187,6 +231,96 @@ function finish(kind, message) {
   $("done-title").textContent = kind === "printed" ? "Printed & destroyed" : "Session closed";
   $("done-message").textContent = message;
   show("done");
+}
+
+// ---------------------------------------------------------------------------
+// Layout panel — turn, move, scale, paper, skip, B&W. Changes how pages sit
+// on paper, never what they say.
+// ---------------------------------------------------------------------------
+const targeted = (i) => layoutTarget === "all" || layoutTarget === i;
+
+function updateLayout(fn) {
+  layout = layout.map((a, i) => (targeted(i) ? { ...a, ...fn(a) } : a));
+  composeAll();
+  renderLayoutPanel();
+}
+
+function renderLayoutPanel() {
+  const target = $("layout-target");
+  target.textContent = "";
+  const all = document.createElement("option");
+  all.value = "all";
+  all.textContent = "All pages";
+  target.appendChild(all);
+  pristine.forEach((_, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = `Page ${i + 1}`;
+    target.appendChild(o);
+  });
+  target.value = String(layoutTarget);
+  $("layout-target-wrap").hidden = pristine.length < 2;
+  const shown = layout[layoutTarget === "all" ? 0 : layoutTarget] ?? defaultAdjust();
+  $("layout-paper").value = layout[0]?.paper ?? "auto";
+  $("layout-fit").value = shown.fit;
+  $("layout-scale").value = String(shown.scalePct);
+  $("layout-scale-label").textContent = `Scale ${shown.scalePct}%`;
+  const sign = (n) => (n >= 0 ? `+${n}` : String(n));
+  $("layout-offset").textContent = `${sign(shown.offsetXmm)} / ${sign(shown.offsetYmm)} mm`;
+  $("layout-gray").checked = shown.grayscale;
+  $("layout-skip-wrap").hidden = layoutTarget === "all";
+  $("layout-skip").checked = !shown.include;
+  const included = layout.filter((a) => a.include).length;
+  $("layout-note").textContent =
+    `Layout never changes what pages say. Printing ${included} of ${pristine.length} page${pristine.length > 1 ? "s" : ""}.`;
+}
+
+/** Paper + orientation for the silent print job (one setting per document). */
+function printPageSetup() {
+  const paper = layout[0]?.paper ?? "auto";
+  const first = layout.findIndex((a) => a.include);
+  if (paper === "auto" || first < 0) return { paper: "auto", landscape: false };
+  const p = pristine[first];
+  const [w, h] = rotatedSize(p.widthMm, p.heightMm, layout[first].rotate);
+  return { paper, landscape: w > h };
+}
+
+$("layout-btn").addEventListener("click", () => {
+  const panel = $("layout-panel");
+  panel.hidden = !panel.hidden;
+  $("layout-btn").setAttribute("aria-expanded", String(!panel.hidden));
+});
+$("layout-target").addEventListener("change", (e) => {
+  layoutTarget = e.target.value === "all" ? "all" : Number(e.target.value);
+  renderLayoutPanel();
+});
+$("layout-paper").addEventListener("change", (e) => {
+  layout = layout.map((a) => ({ ...a, paper: e.target.value }));
+  composeAll();
+  renderLayoutPanel();
+});
+$("layout-fit").addEventListener("change", (e) => updateLayout(() => ({ fit: e.target.value })));
+$("layout-scale").addEventListener("input", (e) => updateLayout(() => ({ scalePct: Number(e.target.value) })));
+$("layout-gray").addEventListener("change", (e) => updateLayout(() => ({ grayscale: e.target.checked })));
+$("layout-skip").addEventListener("change", (e) => updateLayout(() => ({ include: !e.target.checked })));
+$("layout-reset").addEventListener("click", () => {
+  layout = layout.map(() => defaultAdjust());
+  composeAll();
+  renderLayoutPanel();
+});
+for (const btn of document.querySelectorAll("[data-rotate]")) {
+  btn.addEventListener("click", () =>
+    updateLayout((a) => ({ rotate: (a.rotate + Number(btn.dataset.rotate)) % 360 }))
+  );
+}
+for (const btn of document.querySelectorAll("[data-nudge]")) {
+  const [dx, dy] = btn.dataset.nudge.split(",").map(Number);
+  btn.addEventListener("click", () =>
+    updateLayout((a) => ({
+      offsetXmm: Math.max(-40, Math.min(40, a.offsetXmm + dx)),
+      offsetYmm: Math.max(-40, Math.min(40, a.offsetYmm + dy)),
+    }))
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +422,16 @@ $("print-btn").addEventListener("click", async () => {
   verr.hidden = true;
   $("print-btn").disabled = true;
   try {
-    const result = await window.agent.print({ printerName: $("printer-select").value });
+    if (!layout.some((a) => a.include)) {
+      verr.textContent = "Every page is set to skip — include at least one page.";
+      verr.hidden = false;
+      return;
+    }
+    const result = await window.agent.print({
+      printerName: $("printer-select").value,
+      layout,
+      ...printPageSetup(),
+    });
     if (!result.ok) {
       verr.textContent = result.error;
       verr.hidden = false;

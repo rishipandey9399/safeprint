@@ -1,0 +1,31 @@
+# Local services for SafePrint development:
+#   docker compose up -d            → MongoDB + ONLYOFFICE Document Server
+#   npm run dev                     → the app (reads .env)
+#
+# ONLYOFFICE is only needed for Word uploads and Word editing. Set in .env:
+#   ONLYOFFICE_URL=http://localhost:8080
+#   ONLYOFFICE_JWT_SECRET=<same value as JWT_SECRET below>
+#   SAFEPRINT_INTERNAL_URL=http://host.docker.internal:3000
+services:
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+    restart: unless-stopped
+
+  onlyoffice:
+    image: onlyoffice/documentserver:8.3.3
+    ports: ["8080:80"]
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-dev-onlyoffice-secret-change-me}
+      # The Document Server fetches files from the app over a private
+      # address in dev (host.docker.internal). Leave this off in production
+      # when both sit on a public/internal DNS name.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Short cache lifetime so the Document Server doesn't keep working
+      # copies of customers' files around (its default is 24 hours).
+      - ./deploy/onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
+    restart: unless-stopped

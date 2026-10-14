@@ -227,7 +227,9 @@ export function editorConfig(session: ISession, base: string, shopName: string) 
       lang: "en",
       callbackUrl: `${base}/api/onlyoffice/callback?t=${sealRef(callback, ttl)}`,
       user: { id: "shop", name: shopName },
-      coEditing: { mode: "strict", change: false },
+      // "fast" streams edits to the Document Server as they happen, so the
+      // server-side force-save (Send for approval) always has them.
+      coEditing: { mode: "fast", change: false },
       customization: {
         forcesave: true,
         autosave: false,

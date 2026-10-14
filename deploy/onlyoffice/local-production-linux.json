@@ -1,0 +1,12 @@
+{
+  "services": {
+    "CoAuthoring": {
+      "expire": {
+        "files": 1800,
+        "filesCron": "0 */5 * * * *",
+        "sessionidle": "35m",
+        "sessionabsolute": "1h"
+      }
+    }
+  }
+}

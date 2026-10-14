@@ -105,12 +105,52 @@
       <div class="viewer-toolbar">
         <span class="doc-name" id="doc-name"></span>
         <span class="lock-note" id="attempts-note"></span>
+        <button class="btn secondary" id="layout-btn" aria-expanded="false">Layout</button>
         <select id="printer-select" aria-label="Physical printer"></select>
         <button class="btn" id="print-btn">Print</button>
         <button class="btn secondary" id="close-btn">Close</button>
       </div>
       <p class="hint" id="printer-note"></p>
       <p class="error" id="viewer-error" hidden></p>
+      <div class="layout-panel" id="layout-panel" hidden>
+        <div class="layout-row">
+          <label class="tool-field" id="layout-target-wrap">Apply to
+            <select id="layout-target"></select>
+          </label>
+          <label class="tool-field">Paper
+            <select id="layout-paper">
+              <option value="auto">Original size</option>
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+              <option value="Legal">Legal</option>
+            </select>
+          </label>
+          <label class="tool-field">Size
+            <select id="layout-fit">
+              <option value="fit">Fit to paper</option>
+              <option value="actual">Actual size</option>
+            </select>
+          </label>
+          <label class="tool-field"><span id="layout-scale-label">Scale 100%</span>
+            <input type="range" id="layout-scale" min="25" max="200" step="1" value="100" />
+          </label>
+        </div>
+        <div class="layout-row">
+          <span class="tool-group-label">Turn</span>
+          <button class="tool-btn" data-rotate="270">&#10226; 90&deg;</button>
+          <button class="tool-btn" data-rotate="90">&#10227; 90&deg;</button>
+          <span class="tool-group-label">Move</span>
+          <button class="tool-btn" data-nudge="-1,0" aria-label="Move left 1 mm">&larr;</button>
+          <button class="tool-btn" data-nudge="0,-1" aria-label="Move up 1 mm">&uarr;</button>
+          <button class="tool-btn" data-nudge="0,1" aria-label="Move down 1 mm">&darr;</button>
+          <button class="tool-btn" data-nudge="1,0" aria-label="Move right 1 mm">&rarr;</button>
+          <span class="tool-readout" id="layout-offset">+0 / +0 mm</span>
+          <label class="tool-check"><input type="checkbox" id="layout-gray" /> Black &amp; white</label>
+          <label class="tool-check" id="layout-skip-wrap"><input type="checkbox" id="layout-skip" /> Skip this page</label>
+          <button class="tool-btn" id="layout-reset">Reset</button>
+        </div>
+        <p class="hint" id="layout-note"></p>
+      </div>
       <div class="canvas-stack print-area" id="stack"></div>
     </main>
 

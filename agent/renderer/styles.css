@@ -258,8 +258,17 @@ input:focus, select:focus {
     max-width: 100% !important;
     border: none !important;
     box-shadow: none !important;
+    outline: none !important;
+    opacity: 1 !important;
     page-break-after: always;
   }
+  /* a chosen paper size: each page canvas is exactly one sheet */
+  .print-area[data-paper] canvas {
+    width: 100vw !important;
+    height: 100vh !important;
+    object-fit: contain;
+  }
+  .print-area canvas.no-print { display: none !important; }
 }
 
 /* Counter pairing: QR, job queue, link buttons */
@@ -331,3 +340,55 @@ input:focus, select:focus {
 .job:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .job-name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-meta { font-family: var(--form); font-size: 0.75rem; letter-spacing: 0.06em; color: var(--muted); }
+
+/* Layout panel: turn, move, scale, paper, skip — never changes page content */
+.layout-panel {
+  background: var(--sheet);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.layout-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.layout-row + .layout-row { margin-top: 10px; }
+.tool-field, .tool-check, .tool-group-label, .tool-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--form);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tool-readout { text-transform: none; min-width: 90px; }
+.tool-field select { width: auto; min-height: 34px; padding: 4px 8px; margin: 0; }
+.tool-field input[type="range"] { width: 120px; accent-color: var(--stamp-deep); }
+.tool-check input { width: 18px; height: 18px; accent-color: var(--stamp-deep); }
+.tool-btn {
+  min-height: 34px;
+  min-width: 34px;
+  padding: 4px 10px;
+  font-family: var(--form);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.tool-btn:hover:not(:disabled) { border-color: var(--stamp-deep); }
+.tool-btn:disabled { opacity: 0.4; cursor: default; }
+.viewer-toolbar .btn.secondary[aria-expanded="true"] { border-color: var(--stamp-deep); }
+.canvas-stack canvas.no-print {
+  opacity: 0.3;
+  outline: 2px dashed var(--stamp-deep);
+  outline-offset: 4px;
+}

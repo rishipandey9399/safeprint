@@ -114,6 +114,7 @@ export async function cancelEdit(
   session.editRequestedAt = null;
   // Every ended round counts, so a shop can't keep prompting the citizen.
   session.editRounds += 1;
+  session.editLastOutcome = event.slice("edit_".length) as ISession["editLastOutcome"];
   await session.save();
   await logAudit(session._id as never, event, ip);
 }
