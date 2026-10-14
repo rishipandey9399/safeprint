@@ -2,6 +2,7 @@ import { getStorage } from "./storage";
 import { config } from "./config";
 import { generateOtp, hmacOtp } from "./crypto";
 import { logAudit } from "./audit";
+import { deleteBlob } from "./blobs";
 import { Session, type ISession, type SessionStatus, FINAL_STATUSES } from "@/models/Session";
 import type { AuditEvent } from "@/models/AuditLog";
 
@@ -26,6 +27,16 @@ export async function finalizeSession(
     // Keys are still blanked below, so the blob is unreadable regardless;
     // the storage lifecycle rule / cleanup dir is the physical backstop.
   }
+
+  // Original Word source and any unreviewed edit go with it.
+  await deleteBlob(session.source);
+  await deleteBlob(session.edited);
+  await deleteBlob(session.editedSource);
+  session.source = null;
+  session.edited = null;
+  session.editedSource = null;
+  session.editStatus = "none";
+  session.editRequestedAt = null;
 
   session.status = status;
   session.wrappedKey = "";
@@ -87,6 +98,35 @@ export async function resolveStaleApproval(session: ISession): Promise<boolean> 
   return true;
 }
 
+/** Ends an edit round without a new version: the current version stays the print copy. */
+export async function cancelEdit(
+  session: ISession,
+  event: "edit_denied" | "edit_timeout" | "edit_cancelled" | "edit_rejected",
+  ip = ""
+): Promise<void> {
+  await deleteBlob(session.edited);
+  await deleteBlob(session.editedSource);
+  session.edited = null;
+  session.editedSource = null;
+  session.editedSourceExt = null;
+  session.editStatus = "none";
+  session.editKind = null;
+  session.editRequestedAt = null;
+  // Every ended round counts, so a shop can't keep prompting the citizen.
+  session.editRounds += 1;
+  await session.save();
+  await logAudit(session._id as never, event, ip);
+}
+
+/** If the citizen didn't answer an edit request in time, drop it. Returns true if it did. */
+export async function resolveStaleEditRequest(session: ISession): Promise<boolean> {
+  if (session.editStatus !== "requested" || !session.editRequestedAt) return false;
+  const age = Date.now() - session.editRequestedAt.getTime();
+  if (age < config.approvalTimeoutSeconds * 1000) return false;
+  await cancelEdit(session, "edit_timeout");
+  return true;
+}
+
 /** Finalize any sessions whose TTL has passed. Shared by the cleanup job and lazy checks. */
 export async function sweepExpiredSessions(): Promise<number> {
   const stale = await Session.find({
@@ -102,6 +142,13 @@ export async function sweepExpiredSessions(): Promise<number> {
     approvalRequestedAt: { $lte: new Date(Date.now() - config.approvalTimeoutSeconds * 1000) },
   });
   for (const session of pending) await resolveStaleApproval(session);
+
+  const editRequests = await Session.find({
+    status: "verified",
+    editStatus: "requested",
+    editRequestedAt: { $lte: new Date(Date.now() - config.approvalTimeoutSeconds * 1000) },
+  });
+  for (const session of editRequests) await resolveStaleEditRequest(session);
 
   return stale.length;
 }

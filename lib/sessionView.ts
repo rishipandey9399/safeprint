@@ -1,4 +1,4 @@
-import { config } from "./config";
+import { config, wordEditingEnabled } from "./config";
 import type { ISession } from "@/models/Session";
 import { Shop, shopLabel } from "@/models/Shop";
 
@@ -10,6 +10,21 @@ export function viewerPayload(session: ISession) {
     fileSize: session.fileSize,
     expiresAt: session.expiresAt.toISOString(),
     printAttemptsLeft: config.maxPrintAttempts - session.printAttempts,
+    ...editView(session),
+  };
+}
+
+/** Edit state shared by the shop viewer and the citizen's status. */
+export function editView(session: ISession) {
+  return {
+    editStatus: session.editStatus ?? "none",
+    editKind: session.editKind ?? null,
+    editRoundsLeft: Math.max(0, config.maxEditRounds - (session.editRounds ?? 0)),
+    wordEditable: wordEditingEnabled() && !!session.source,
+    editRequestExpiresAt:
+      session.editStatus === "requested" && session.editRequestedAt
+        ? new Date(session.editRequestedAt.getTime() + config.approvalTimeoutSeconds * 1000).toISOString()
+        : null,
   };
 }
 
@@ -33,5 +48,6 @@ export async function ownerStatus(session: ISession) {
     approvalExpiresAt: session.approvalRequestedAt
       ? new Date(session.approvalRequestedAt.getTime() + config.approvalTimeoutSeconds * 1000).toISOString()
       : null,
+    ...editView(session),
   };
 }

@@ -47,4 +47,19 @@ export const config = {
   maxOtpRegenerations: 5,
   maxPrintAttempts: 2,
   maxRenderFetches: 20,
+  // Shop-side editing (citizen consents up front, then approves the result).
+  maxEditRounds: 3,
+  editTtlExtensionSeconds: parseInt(process.env.EDIT_TTL_EXTENSION_SECONDS ?? "900", 10),
+  maxEditPages: 50,
+  // ONLYOFFICE Document Server for Word conversion + editing. Unset = Word
+  // uploads are refused and only the image editor is offered.
+  onlyofficeUrl: (process.env.ONLYOFFICE_URL ?? "").replace(/\/+$/, ""),
+  onlyofficeJwtSecret: process.env.ONLYOFFICE_JWT_SECRET ?? "",
+  // How the Document Server reaches this app (server-to-server); defaults to
+  // the public URL the request came in on.
+  internalBaseUrl: (process.env.SAFEPRINT_INTERNAL_URL ?? "").replace(/\/+$/, ""),
 };
+
+export function wordEditingEnabled(): boolean {
+  return !!(config.onlyofficeUrl && config.onlyofficeJwtSecret);
+}

@@ -15,7 +15,16 @@ export type AuditEvent =
   | "print_confirmed"
   | "session_closed"
   | "session_expired"
-  | "file_deleted";
+  | "file_deleted"
+  | "word_converted"
+  | "edit_requested"
+  | "edit_granted"
+  | "edit_denied"
+  | "edit_timeout"
+  | "edit_cancelled"
+  | "edit_submitted"
+  | "edit_approved"
+  | "edit_rejected";
 
 export interface IAuditLog extends mongoose.Document {
   sessionId: mongoose.Types.ObjectId;

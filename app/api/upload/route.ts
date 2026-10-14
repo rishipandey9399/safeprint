@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectDb } from "@/lib/db";
-import { config } from "@/lib/config";
+import { config, wordEditingEnabled } from "@/lib/config";
 import { encryptFile, generateShareCode, generateToken, hashToken } from "@/lib/crypto";
 import { getStorage } from "@/lib/storage";
+import { deleteBlob, storeBlob } from "@/lib/blobs";
+import { sniffFile } from "@/lib/fileType";
+import { appBaseUrl, convertToPdf, fileUrlFor } from "@/lib/onlyoffice";
+import type { StoredBlob } from "@/models/Session";
 import { issueOtp } from "@/lib/lifecycle";
 import { logAudit } from "@/lib/audit";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
@@ -11,14 +15,6 @@ import { Shop, shopLabel } from "@/models/Shop";
 import crypto from "crypto";
 
 export const runtime = "nodejs";
-
-// Never trust the client-declared MIME type — sniff magic bytes.
-function sniffMimeType(buf: Buffer): string | null {
-  if (buf.length > 4 && buf.subarray(0, 4).toString("latin1") === "%PDF") return "application/pdf";
-  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (buf.length > 8 && buf.readUInt32BE(0) === 0x89504e47) return "image/png";
-  return null;
-}
 
 export async function POST(req: Request): Promise<NextResponse> {
   const ip = getClientIp(req);
@@ -41,10 +37,25 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "File too large (max 15 MB)." }, { status: 413 });
   }
 
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const mimeType = sniffMimeType(bytes);
-  if (!mimeType) {
-    return NextResponse.json({ error: "Only PDF, JPEG, or PNG files are supported." }, { status: 415 });
+  let bytes: Buffer = Buffer.from(await file.arrayBuffer());
+  // Never trust the client-declared MIME type — sniff magic bytes.
+  const sniffed = sniffFile(bytes);
+  if (sniffed.kind === "rejected") {
+    return NextResponse.json(
+      { error: `Only PDF, Word, JPEG, or PNG files are supported (${sniffed.reason}).` },
+      { status: 415 }
+    );
+  }
+  if (sniffed.kind === "word") {
+    if (!wordEditingEnabled()) {
+      return NextResponse.json(
+        { error: "Word files aren't supported on this server yet — save it as PDF and upload that." },
+        { status: 415 }
+      );
+    }
+    if (!(await rateLimit(`upload-word:${ip}`, 5, 60 * 60 * 1000))) {
+      return NextResponse.json({ error: "Too many Word uploads. Try again later." }, { status: 429 });
+    }
   }
 
   const rawShopCode = form.get("shopCode");
@@ -60,6 +71,30 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!shop) {
       return NextResponse.json({ error: "Unknown shop code. Check it with the shop." }, { status: 400 });
     }
+  }
+
+  // Word files: keep the original (encrypted) so the shop can edit it as
+  // Word later, and print from a PDF rendition made by the Document Server,
+  // which fetches the original over a sealed, short-lived server-only URL.
+  let source: StoredBlob | null = null;
+  let mimeType: string = sniffed.kind === "word" ? "application/pdf" : sniffed.mimeType;
+  if (sniffed.kind === "word") {
+    source = await storeBlob(bytes);
+    try {
+      bytes = await convertToPdf(fileUrlFor(appBaseUrl(req), source, sniffed.ext), sniffed.ext);
+    } catch (err) {
+      console.error("[SafePrint] Word conversion failed:", err);
+      await deleteBlob(source);
+      return NextResponse.json(
+        { error: "Couldn't open this Word file. Save it as PDF and upload that instead." },
+        { status: 422 }
+      );
+    }
+    if (sniffFile(bytes).kind !== "pdf") {
+      await deleteBlob(source);
+      return NextResponse.json({ error: "Word conversion produced an invalid file." }, { status: 502 });
+    }
+    mimeType = "application/pdf";
   }
 
   // Encrypt before anything touches storage.
@@ -87,6 +122,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     mimeType,
     fileSize: file.size,
     ...keys,
+    source,
+    sourceExt: sniffed.kind === "word" ? sniffed.ext : null,
     expiresAt,
   });
   const otp = issueOtp(session);
@@ -97,6 +134,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     size: file.size,
     shopId: shop?._id ?? null,
   });
+  if (sniffed.kind === "word") {
+    await logAudit(session._id as never, "word_converted", ip, { from: sniffed.ext });
+  }
 
   // The OTP is returned ONLY to the uploader's own screen (like a ride OTP)
   // — they say it to the operator in person. It is never logged, sent
@@ -109,5 +149,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     expiresAt: expiresAt.toISOString(),
     otpExpiresAt: session.otpExpiresAt!.toISOString(),
     shopName: shop ? shopLabel(shop) : null,
+    convertedFrom: sniffed.kind === "word" ? sniffed.ext : null,
   });
 }

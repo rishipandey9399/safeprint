@@ -27,6 +27,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Not authorized or session ended." }, { status: 403 });
   }
 
+  if (session.editStatus !== "none") {
+    return NextResponse.json(
+      { error: "The document is being edited — wait for the customer's approval." },
+      { status: 409 }
+    );
+  }
+
   if (session.renderCount >= config.maxRenderFetches) {
     return NextResponse.json({ error: "Render limit reached for this session." }, { status: 429 });
   }

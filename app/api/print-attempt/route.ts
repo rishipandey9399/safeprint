@@ -17,6 +17,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Not authorized or session ended." }, { status: 403 });
   }
 
+  if (session.editStatus !== "none") {
+    return NextResponse.json(
+      { error: "The document is being edited — wait for the customer's approval." },
+      { status: 409 }
+    );
+  }
+
   if (session.printAttempts >= config.maxPrintAttempts) {
     return NextResponse.json(
       { error: "Print attempt limit reached.", attemptsLeft: 0 },

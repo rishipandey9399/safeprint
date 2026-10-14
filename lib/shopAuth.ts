@@ -1,5 +1,5 @@
 import { hashToken } from "./crypto";
-import { finalizeSession, isExpired, resolveStaleApproval } from "./lifecycle";
+import { finalizeSession, isExpired, resolveStaleApproval, resolveStaleEditRequest } from "./lifecycle";
 import { Session, FINAL_STATUSES, type ISession } from "@/models/Session";
 import { Shop, type IShop } from "@/models/Shop";
 
@@ -30,6 +30,7 @@ export async function findVerifiedSession(req: Request): Promise<ISession | null
     await finalizeSession(session, "expired", "session_expired");
     return null;
   }
+  await resolveStaleEditRequest(session);
   return session;
 }
 
@@ -48,6 +49,7 @@ export async function findOwnerSession(req: Request): Promise<ISession | null> {
     await finalizeSession(session, "expired", "session_expired");
   } else {
     await resolveStaleApproval(session);
+    await resolveStaleEditRequest(session);
   }
   return session;
 }
