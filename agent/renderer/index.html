@@ -10,7 +10,73 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="page" id="connect-screen">
+    <main class="page" id="setup-screen" hidden>
+      <div class="brand"><h1>SAFEPRINT<span class="dot">.</span></h1></div>
+      <span class="formref">Form SP-3 · Verified shop agent</span>
+      <p class="tagline">
+        Set up this computer as a SafePrint counter once. Customers scan your counter QR, upload,
+        and you only type the <strong>OTP</strong> they read you.
+      </p>
+      <div class="card">
+        <h2>Set up this counter</h2>
+        <label for="setup-server">SafePrint server</label>
+        <input id="setup-server" type="text" placeholder="https://safeprint.example.com" spellcheck="false" />
+        <label for="setup-name">Shop name</label>
+        <input id="setup-name" type="text" maxlength="60" placeholder="e.g. Sharma Xerox" />
+        <label for="setup-area">Area (optional)</label>
+        <input id="setup-area" type="text" maxlength="60" placeholder="e.g. Andheri West" />
+        <button class="btn" id="setup-btn">Create counter QR</button>
+        <p class="error" id="setup-error" hidden></p>
+        <p class="hint">No password needed: this computer keeps a private counter key.</p>
+        <button class="link-btn" id="setup-skip">Continue without setting up — enter share code + OTP</button>
+      </div>
+    </main>
+
+    <main class="page wide" id="counter-screen" hidden>
+      <div class="brand"><h1>SAFEPRINT<span class="dot">.</span></h1></div>
+      <span class="formref">Form SP-3 · Verified shop agent</span>
+      <p class="tagline">
+        Customers scan your QR and upload. Pick their job and type the <strong>OTP</strong> — it
+        opens once they tap Allow, and prints straight to a physical printer.
+      </p>
+      <div class="counter-grid">
+        <div class="card counter-qr">
+          <h2 id="counter-name"></h2>
+          <p class="hint" id="counter-area"></p>
+          <div class="qr" id="counter-qr"></div>
+          <div class="code-label">Counter code</div>
+          <div class="counter-code" id="counter-code"></div>
+          <p class="hint">Customers scan this with their phone camera.</p>
+          <button class="link-btn" id="forget-btn">Forget this counter</button>
+        </div>
+        <div class="card">
+          <h2>Incoming jobs</h2>
+          <p class="error" id="jobs-error" hidden></p>
+          <p class="hint" id="jobs-empty">No customers waiting. Jobs appear here as soon as someone uploads.</p>
+          <ul class="job-list" id="job-list"></ul>
+          <div id="job-otp" hidden>
+            <label for="job-otp-input">Customer&rsquo;s 6-digit OTP</label>
+            <input id="job-otp-input" type="text" maxlength="6" inputmode="numeric" placeholder="••••••" />
+            <button class="btn" id="job-open-btn">Open document</button>
+          </div>
+          <p class="error" id="counter-error" hidden></p>
+          <p class="hint">Wrong OTP 5 times destroys the customer&rsquo;s file.</p>
+          <button class="link-btn" id="manual-btn">Customer didn&rsquo;t scan the QR? Enter share code + OTP</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="page" id="waiting-screen" hidden>
+      <div class="brand"><h1>SAFEPRINT<span class="dot">.</span></h1></div>
+      <span class="formref">Form SP-3 · Verified shop agent</span>
+      <div class="card big-result">
+        <h2>Waiting for the customer to tap Allow…</h2>
+        <p class="hint" id="waiting-note"></p>
+        <button class="btn secondary" id="waiting-cancel">Cancel</button>
+      </div>
+    </main>
+
+    <main class="page" id="connect-screen" hidden>
       <div class="brand"><h1>SAFEPRINT<span class="dot">.</span></h1></div>
       <span class="formref">Form SP-3 · Verified shop agent</span>
       <p class="tagline">
@@ -31,6 +97,7 @@
         <p class="hint">
           Wrong OTP 5 times locks the session and deletes the customer&rsquo;s file.
         </p>
+        <button class="link-btn" id="connect-back">&larr; Back</button>
       </div>
     </main>
 
@@ -53,7 +120,7 @@
         <h2 id="done-title"></h2>
         <p id="done-message"></p>
         <p class="hint">Nothing was saved on this computer.</p>
-        <button class="btn secondary" id="again-btn">Print another customer&rsquo;s document</button>
+        <button class="btn secondary" id="again-btn">Next customer</button>
       </div>
     </main>
 

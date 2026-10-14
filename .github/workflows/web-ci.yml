@@ -1,0 +1,29 @@
+name: Web CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["agent/**"]
+  pull_request:
+    paths-ignore: ["agent/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/safeprint_test

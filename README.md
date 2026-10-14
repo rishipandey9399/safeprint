@@ -6,18 +6,33 @@ download, save, forward, or retain a copy**.
 
 ## The core loop
 
-1. **Citizen** (phone browser, `/`): uploads a PDF/JPG/PNG → gets a **6-char share code + 6-digit
-   OTP** and a live status screen with a 30-minute self-destruct countdown.
-2. Citizen tells the two codes to the shop operator **in person**.
-3. **Shop** (desktop browser, `/shop`): enters share code + OTP (max 5 wrong tries, then the file
-   is destroyed). No software install needed.
-4. The document opens in a **locked, view-only viewer** — rendered onto `<canvas>` via PDF.js.
+The OTP works like a ride OTP in Rapido or Uber: it is generated fresh for every session, shown
+**only in the citizen's app**, and said out loud at the counter. No SMS is involved.
+
+1. **Shop, once** (`/shop` or the desktop agent): sets up the counter with a name and area → gets
+   a **counter QR + 6-char counter code** to display. No password; the browser/agent keeps a
+   private device key.
+2. **Citizen** (phone browser): scans the counter QR (opens `/?shop=CODE` → "Printing at Sharma
+   Xerox, Andheri") and uploads a PDF/JPG/PNG → gets a **6-digit OTP** valid for 10 minutes
+   (Show/Hide toggle, Regenerate button, live status, 30-minute self-destruct countdown). A
+   refresh keeps the OTP on screen.
+3. The job appears in the counter's **Incoming jobs** list. The operator picks it and types the
+   OTP the citizen reads out (max 5 wrong tries, then the file is destroyed; the citizen sees a
+   live "⚠ 2 wrong attempts" warning). A paired job opens **only from that counter**.
+4. On a correct OTP the citizen's phone asks **"Sharma Xerox wants to open your document —
+   Allow / Deny"** (auto-denied after 2 minutes). Nothing is viewable until they tap Allow.
+5. The document opens in a **locked, view-only viewer** — rendered onto `<canvas>` via PDF.js.
    Right-click, Ctrl+S, Ctrl+P, copy, drag, and text selection are blocked; there is no URL,
    `<img>`, `<embed>` or blob link in the DOM for "Save as" to grab.
-5. Operator clicks **Print** (max 2 attempts) → native browser print dialog → confirms the print.
-6. On confirmation — or when the window closes, or when the 30-minute TTL expires — the file is
-   **permanently deleted** (blob removed + encryption keys blanked) and the citizen's screen /
-   mock SMS confirms the outcome.
+6. Operator clicks **Print** (max 2 attempts) → native browser print dialog (or silent physical
+   print in the agent) → confirms the print.
+7. On confirmation — or when the window closes, or when the 30-minute TTL expires — the file is
+   **permanently deleted** (blob removed + encryption keys blanked) and the citizen's screen
+   updates live.
+
+Citizens who didn't scan a QR (or shops that never set up a counter) use the fallback: the
+citizen's screen shows a **share code + OTP**, and the operator types both at `/shop`. The Allow
+step still applies.
 
 ## Run it locally
 
@@ -29,20 +44,23 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000> (citizen upload page) and <http://localhost:3000/shop> (shop portal)
-in two windows. The OTP appears on the citizen's screen and in the server console
-(`[SafePrint SMS mock] OTP for …`).
+Open <http://localhost:3000/shop> (set up a counter) and the QR/`/?shop=CODE` link in a second
+window (citizen page). The OTP appears **only** on the citizen's screen — it is never logged.
 
 No env vars are required for local dev. To customize, copy `.env.example` to `.env`:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/safeprint` | Sessions + audit logs only — never file contents |
-| `MASTER_KEY` | dev-derived constant | 64 hex chars; **required in production** |
+| `MASTER_KEY` | dev-derived constant | 64 hex chars; **required in production** (server refuses to start without it) |
 | `STORAGE_DRIVER` | `local` | `local` or `gcs` |
 | `LOCAL_STORE_DIR` | `.safeprint-store` | Encrypted blob dir for the local driver |
 | `GCS_BUCKET` | — | Bucket name when `STORAGE_DRIVER=gcs` |
+| `REDIS_URL` | — | Optional shared rate-limit store; in-memory when unset |
 | `SESSION_TTL_SECONDS` | `1800` | Session/file lifetime |
+| `OTP_TTL_SECONDS` | `600` | Lifetime of one OTP (citizen can regenerate up to 5 times) |
+| `APPROVAL_TIMEOUT_SECONDS` | `120` | Time the citizen has to tap Allow |
+| `SAFEPRINT_AUTO_APPROVE` | — | `1` skips the Allow tap — dev/tests only, ignored in production |
 | `CLEANUP_INTERVAL_MS` | `60000` | Background sweep cadence |
 
 ## Security model
@@ -51,18 +69,22 @@ No env vars are required for local dev. To customize, copy `.env.example` to `.e
   the DEK is wrapped with the master key and stored only in the session document. Deletion removes
   the blob **and** blanks the wrapped key — crypto-shredding, so even a leaked blob copy is
   unreadable. Storage never sees plaintext.
-- **Two secrets, two channels**: the share code locates the session; the OTP (HMAC-hashed at
-  rest, compared timing-safe, 5 attempts) proves in-person authorization. Success mints a one-time
-  **viewer token**; `render`/`print` endpoints accept it **only in the `Authorization` header** —
-  a token pasted into a URL does nothing, so no fetchable address ever exists.
+- **In-app OTP, three checks**: the counter pairing (device key) or share code locates the
+  session; the OTP (fresh per session, 10-minute life, HMAC-hashed at rest, compared timing-safe,
+  5 attempts, never logged) proves the citizen is at the counter; the citizen's **Allow** tap
+  releases it. A correct OTP mints a viewer token that is useless until Allow — `render`/`print`
+  accept it **only in the `Authorization` header** and only once approved. The citizen's owner
+  token is also header-only (no tokens in any URL).
 - **No recoverable local copy**: bytes are fetched with the header token and painted onto canvas.
   `Cache-Control: no-store` + `Content-Disposition: inline` on every API response; no
   `<a>/<img>/<embed>/<iframe>` elements; `user-select: none`; right-click/copy/drag/Ctrl+S/Ctrl+P
   suppressed. Print uses `@media print` CSS so only the canvases reach the print dialog.
-- **Rate limits**: 10 uploads/hour/IP, 15 OTP checks/min/IP, 30 renders/min/IP, plus per-session
-  caps (5 OTP tries, 2 print attempts, 20 render fetches).
-- **Audit log** per session: upload, OTP failures/success, renders, print attempts, confirmation,
-  deletion, expiry — each with timestamp + IP (`auditlogs` collection).
+- **Rate limits**: 10 uploads/hour/IP, 15 OTP checks/min/IP, 30 renders/min/IP, 5 counter
+  registrations/hour/IP, plus per-session caps (5 OTP tries, 5 OTP regenerations, 2 print
+  attempts, 20 render fetches). Redis-backed when `REDIS_URL` is set.
+- **Audit log** per session: upload, OTP failures/success/regeneration, approval
+  requested/granted/denied/timed out, renders, print attempts, confirmation, deletion, expiry —
+  each with timestamp + IP (+ counter id) (`auditlogs` collection).
 
 ### Honest limitations (MVP, browser-only by design)
 
@@ -87,8 +109,10 @@ print or 30 minutes.
 | Session-coded watermark on every rendered/printed pixel (browser portal only) | Real, working |
 | Local encrypted storage (`lib/storage/local.ts`) | Real — dev stand-in for GCS behind the same interface |
 | GCS storage (`lib/storage/gcs.ts`) | Written but unexercised — needs `npm i @google-cloud/storage`, creds, bucket + 1-day lifecycle rule (deletion backstop); see file header |
-| SMS/OTP delivery (`lib/otp.ts`) | Mocked — logs to console; swap in MSG91/Twilio behind `OtpProvider` |
-| Rate limiting | Real but in-memory (single process); move to Redis for production |
+| In-app OTP (per session, expiring, regenerable) + citizen Allow/Deny | Real, working — no SMS needed |
+| Counter pairing (QR + device key, incoming jobs queue) | Real, working (browser portal + agent) |
+| Rate limiting | Real — Redis when `REDIS_URL` is set, in-memory fallback otherwise |
+| Tests | `npm test` — unit + full route flow against local MongoDB; runs in CI (`web-ci.yml`) |
 | HTTPS | Terminate TLS at your proxy/host in production; dev is plain HTTP |
 | Desktop agent (silent physical-only printing, capture blocking) | Real, working — verified end-to-end by `npm run selftest`; installers unsigned until signing keys are added |
 
@@ -108,6 +132,10 @@ entirely:
 - **Screenshot/screen-capture blocking** — `setContentProtection(true)`: the window renders
   black in captures and screen shares on **Windows** (`SetWindowDisplayAffinity`) and **macOS**
   (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap.
+- **Counter mode** — first launch sets up the counter (server, shop name, area): the agent shows
+  the counter QR and the incoming jobs list, and the operator types only the OTP, then waits for
+  the citizen's Allow. The device key is kept in the main process (`userData/counter.json`) and
+  never reaches the renderer.
 - **Token isolation** — the viewer token lives only in the Electron main process; the sandboxed
   renderer (contextIsolation, no Node, CSP, all navigation/permissions denied) receives document
   bytes and printer names, nothing else.
@@ -128,6 +156,7 @@ production hardening step).
 cd agent && npm install          # also vendors pdf.js into renderer/
 npm start                        # run against any SafePrint server URL
 npm run selftest -- --server=http://localhost:3000 --code=ABC123 --otp=123456
+# (start the server with SAFEPRINT_AUTO_APPROVE=1, or tap Allow on the citizen page)
 npm run dist                     # build installer for the current OS
 ```
 
@@ -152,28 +181,38 @@ added as repo secrets:
 
 ```
 app/
-  page.tsx              citizen upload flow (mobile-first)
-  shop/page.tsx         shop portal: code entry → locked viewer
-  api/upload            encrypt + store + mint codes
-  api/verify-otp        5-attempt OTP check → one-time viewer token
+  page.tsx              citizen: shop pairing, upload, in-app OTP, Allow/Deny, live status
+  shop/page.tsx         shop portal: counter setup → QR + jobs → OTP → wait for Allow → viewer
+  api/upload            encrypt + store + pair with counter + mint OTP
+  api/verify-otp        5-attempt OTP check → viewer token (inactive until Allow)
+  api/approve           citizen Allow / Deny
+  api/approval-status   shop polls for the citizen's answer
+  api/regenerate-otp    citizen requests a new OTP
+  api/shops/*           register a counter, look up a code, list a counter's jobs
   api/render            decrypted bytes, header-auth only, no-store
   api/print-attempt     max-2 print counter
   api/confirm-print     delete file immediately on confirmation
   api/session-close     sendBeacon target for window-close deletion
-  api/status            polled by the citizen's page
+  api/status(/stream)   citizen's live status (streamed; polling fallback)
 components/LockedViewer.tsx   canvas rendering + input locks + print flow
-lib/                    crypto, storage adapters, OTP provider, rate limit,
-                        lifecycle (single finalize/delete path), cleanup job
-models/                 Session + AuditLog Mongoose schemas
+components/ShopCounter.tsx    counter QR + incoming jobs + OTP entry
+lib/                    crypto, storage adapters, rate limit (Redis/memory), auth helpers,
+                        lifecycle (OTP issue/approval/finalize), cleanup job
+models/                 Session, Shop, AuditLog Mongoose schemas
+tests/                  node:test suites (npm test)
 instrumentation.ts      starts the background cleanup sweep on boot
 ```
 
 ## Verified end-to-end
 
-Upload → OTP on console + uploader screen → wrong OTP counted (and 5-strike lockout deletes the
-file) → locked viewer renders PDF on canvas with right-click/Ctrl+S/Ctrl+P/copy blocked (checked
-via dispatched events: all `defaultPrevented`) → render endpoint refuses missing/URL-param tokens
-and sets `no-store` → Print button opens the native dialog, confirmation deletes the blob within
-~1s → uploader's page flips to "Printed & permanently deleted" and mock SMS fires → window-close
-beacon deletes unprinted sessions → 10-second-TTL test instance auto-swept an untouched session.
-Not verified: a real 30-minute wait (tested with `SESSION_TTL_SECONDS=10` instead) and real GCS.
+Counter setup renders QR + code → `/?shop=CODE` shows "Printing at …" → upload → OTP shown only
+on the citizen's screen (never in server logs) and survives a page refresh → job appears in the
+counter's queue → wrong OTP shows a live warning on the phone → paired job refuses verification
+without the counter's key or with another counter's key → correct OTP raises the Allow prompt;
+the document stays unrenderable (403) until Allow → Deny voids the viewer token → Regenerate
+invalidates the old OTP → Allow opens the locked viewer → close/print deletes the file and the
+phone updates via the status stream → owner token in a URL query is refused. The agent selftest
+passes the approval flow plus counter register/QR/jobs/forget. `npm test` covers the same flow,
+OTP expiry (410, no attempt counted), approval timeout, regenerate cap and 5-strike lockout with
+crypto-shredding. Not verified: a real Redis server (the unreachable-Redis fallback is), a real
+30-minute wait, and real GCS.

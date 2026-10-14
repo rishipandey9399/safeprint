@@ -261,3 +261,73 @@ input:focus, select:focus {
     page-break-after: always;
   }
 }
+
+/* Counter pairing: QR, job queue, link buttons */
+.link-btn {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 6px 0;
+  font-family: var(--form);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--stamp-deep);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.link-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.counter-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 760px) { .counter-grid { grid-template-columns: minmax(0, 1fr); } }
+.counter-qr { text-align: center; }
+.qr {
+  margin: 14px auto 10px;
+  max-width: 240px;
+  aspect-ratio: 1;
+  background: #fffdf7;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.qr svg { display: block; width: 100%; height: 100%; }
+.code-label {
+  font-family: var(--form);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--muted);
+}
+.counter-code {
+  font-family: var(--form);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--stamp-deep);
+}
+.job-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.job {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  padding: 10px 14px;
+  background: #fffdf7;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.job:hover, .job.selected { border-color: var(--stamp-deep); }
+.job.selected { background: #f6ddc9; }
+.job:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.job-name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { font-family: var(--form); font-size: 0.75rem; letter-spacing: 0.06em; color: var(--muted); }
