@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampAdjust, defaultAdjust, isDefault, layout, rotatedSize, summarizeAdjust } from "@/lib/pageAdjust";
+import { clampAdjust, defaultAdjust, isDefault, isOffPaper, layout, rotatedSize, summarizeAdjust } from "@/lib/pageAdjust";
 
 test("clampAdjust bounds untrusted input", () => {
   assert.deepEqual(clampAdjust(null), defaultAdjust());
   const a = clampAdjust({ rotate: 45, offsetXmm: 999, offsetYmm: -999, scalePct: 5, fit: "zoom", paper: "A0", include: 0, grayscale: "yes" });
   assert.deepEqual(a, { ...defaultAdjust(), rotate: 0, offsetXmm: 40, offsetYmm: -40, scalePct: 25 });
   assert.equal(clampAdjust({ include: false }).include, false);
+  assert.equal(clampAdjust({ scalePct: 200 }).scalePct, 100, "no enlarging past the paper");
   assert.equal(clampAdjust({ rotate: 270, paper: "Legal" }).rotate, 270);
 });
 
@@ -36,4 +37,16 @@ test("summarizeAdjust records only what changed", () => {
   assert.ok(isDefault(defaultAdjust()));
   const s = summarizeAdjust([{ ...defaultAdjust(), rotate: 90 }, { ...defaultAdjust(), include: false }]);
   assert.deepEqual(s, { changed: { p1: { rotate: 90 } }, skipped: [2] });
+});
+
+test("isOffPaper flags content pushed off the sheet", () => {
+  const a4: [number, number] = [210, 297];
+  assert.equal(isOffPaper(a4, defaultAdjust()), false);
+  assert.equal(isOffPaper(a4, { ...defaultAdjust(), paper: "A4", scalePct: 80, offsetXmm: 15 }), false, "shrunk page has room to move");
+  assert.equal(isOffPaper(a4, { ...defaultAdjust(), paper: "A4", offsetXmm: 5 }), true);
+  assert.equal(isOffPaper(a4, { ...defaultAdjust(), paper: "A4", offsetYmm: 0.5 }), false, "within tolerance");
+  // Legal page at actual size on A4 overhangs.
+  assert.equal(isOffPaper([215.9, 355.6], { ...defaultAdjust(), paper: "A4", fit: "actual" }), true);
+  const s = summarizeAdjust([{ ...defaultAdjust(), paper: "A4", offsetXmm: 5 }], [a4]);
+  assert.deepEqual(s?.offPaper, [1]);
 });

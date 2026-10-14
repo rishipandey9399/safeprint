@@ -3,7 +3,7 @@ import { PDFDocument } from "pdf-lib";
 import { connectDb } from "@/lib/db";
 import { config } from "@/lib/config";
 import { submitEdit } from "@/lib/edits";
-import { sniffFile } from "@/lib/fileType";
+import { jpegSize, sniffFile } from "@/lib/fileType";
 import { findVerifiedSession } from "@/lib/shopAuth";
 import { editView } from "@/lib/sessionView";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
@@ -11,6 +11,9 @@ import { rateLimit, getClientIp } from "@/lib/rateLimit";
 export const runtime = "nodejs";
 
 const MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+// A page at print resolution is ~10 MP; this leaves room for big scans while
+// keeping a hostile header from describing a gigabyte-sized image.
+const MAX_PAGE_PIXELS = 40_000_000;
 const MIN_PT = 72; // 1 inch
 const MAX_PT = 14400; // PDF user-space limit
 
@@ -28,7 +31,7 @@ function readTools(raw: FormDataEntryValue | null): string[] {
 }
 
 /**
- * The image editor's output: one PNG/JPEG per page (rendered in the shop's
+ * The image editor's output: one JPEG per page (rendered in the shop's
  * locked viewer) plus each page's physical size in PDF points. Assembled into
  * a PDF, encrypted, and held for the citizen's review — never sent back to
  * the shop's browser except through the locked viewer after approval.
@@ -80,13 +83,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   const pdf = await PDFDocument.create();
   for (let i = 0; i < pages.length; i++) {
     const bytes = Buffer.from(await pages[i].arrayBuffer());
+    // JPEG only: pdf-lib embeds JPEG without decoding pixels, whereas a PNG is
+    // fully decompressed in memory — a small file can declare a huge image.
     const kind = sniffFile(bytes);
-    if (kind.kind !== "image") {
-      return NextResponse.json({ error: "Pages must be PNG or JPEG." }, { status: 415 });
+    if (kind.kind !== "image" || kind.mimeType !== "image/jpeg") {
+      return NextResponse.json({ error: "Pages must be JPEG." }, { status: 415 });
+    }
+    const dims = jpegSize(bytes);
+    if (!dims || dims.width === 0 || dims.height === 0 || dims.width * dims.height > MAX_PAGE_PIXELS) {
+      return NextResponse.json({ error: "A page image is too large." }, { status: 413 });
     }
     let image;
     try {
-      image = kind.mimeType === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+      image = await pdf.embedJpg(bytes);
     } catch {
       return NextResponse.json({ error: "A page image couldn't be read." }, { status: 400 });
     }

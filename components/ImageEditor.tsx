@@ -23,6 +23,8 @@ export interface EditedPage {
 
 interface Props {
   pages: RenderedPage[];
+  /** Session-coded label tiled over the on-screen editor (never into the output). */
+  watermark: string;
   busy: boolean;
   onSubmit: (pages: EditedPage[], tools: string[]) => Promise<void>;
   onCancel: () => void;
@@ -56,7 +58,22 @@ const isHelper = (o: object | undefined) => (o as { spHelper?: boolean } | undef
  * a FormData upload to SafePrint for the citizen's review — never to a URL,
  * download link, or the clipboard.
  */
-export default function ImageEditor({ pages, busy, onSubmit, onCancel }: Props) {
+/**
+ * A tiled, faint label as an SVG background: everything the operator can see
+ * stays session-marked, like the locked viewer. It sits above the editing
+ * canvas but takes no pointer input and is not part of the exported pages.
+ */
+function watermarkTile(label: string): string {
+  const esc = label.replace(/[<>&"']/g, "");
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="200">` +
+    `<text x="180" y="110" text-anchor="middle" transform="rotate(-30 180 100)" ` +
+    `font-family="Courier New, monospace" font-weight="700" font-size="20" ` +
+    `fill="rgba(178,62,29,0.16)">${esc}</text></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+export default function ImageEditor({ pages, watermark, busy, onSubmit, onCancel }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const elRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<Fabric | null>(null);
@@ -756,6 +773,7 @@ export default function ImageEditor({ pages, busy, onSubmit, onCancel }: Props) 
 
       <div className="editor-stage" ref={hostRef} style={{ filter: tonePreview }}>
         <canvas ref={elRef} />
+        <div className="editor-watermark" aria-hidden="true" style={{ backgroundImage: watermarkTile(watermark) }} />
         {!ready && <p className="hint">Loading editor…</p>}
       </div>
 

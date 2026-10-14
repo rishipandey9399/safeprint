@@ -36,8 +36,9 @@ A real shop fixes a badly aligned file before printing it. SafePrint lets the op
 same without ever getting a downloadable or editable copy to keep:
 
 - **Layout** (no permission needed, logged with the print): turn pages, nudge them by the
-  millimetre, scale / fit to paper, choose A4 / Letter / Legal, print in black & white, skip pages.
-  Layout changes how pages sit on paper — never what they say.
+  millimetre, shrink / fit to paper, choose A4 / Letter / Legal, print in black & white, skip pages.
+  Pages can't be enlarged past the paper; a layout that pushes content off the sheet is flagged on
+  screen and recorded in the audit log (`offPaper`). Changing what a page says needs **Edit**.
 - **Edit** (customer consent required, twice):
   1. Operator taps **Edit** → the citizen's phone asks *"Sharma Xerox wants to EDIT your
      document — Allow / Deny"* (auto-denied after 2 minutes).
@@ -123,8 +124,12 @@ extra. To customize, copy `.env.example` to `.env`:
   uploads its result straight to `/api/edit/pages`; the Word editor is ONLYOFFICE with download,
   print and copy disabled by permissions the server signs (the browser can't change them).
   The Document Server fetches the Word source through `/api/onlyoffice/file` with a sealed
-  (AES-GCM, 5–45 min) reference **and** its own JWT, and posts saves to `/api/onlyoffice/callback`
-  (JWT-verified; results are fetched only from the configured Document Server host). Every
+  (AES-GCM, 5–10 min) reference **and** a JWT the Document Server signed for that exact URL —
+  the editor config the shop's browser holds is signed with the same secret, so any other token
+  (including that one) is refused. Saves arrive at `/api/onlyoffice/callback` (JWT-verified;
+  results are fetched only from the configured Document Server host). Tokens without an expiry
+  are rejected. While photo-editing, the operator's screen carries the same `SP-<code>` watermark
+  as the viewer; the pages sent for review are clean and get watermarked when displayed. Every
   version — original, Word source, unreviewed edits — is encrypted like the upload and
   crypto-shredded when the session ends. Upload and edit rounds are audit-logged
   (`word_converted`, `edit_requested/granted/denied/timeout/cancelled/submitted/approved/rejected`),

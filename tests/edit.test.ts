@@ -31,6 +31,15 @@ const PNG_1PX = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64"
 );
+const JPEG_1PX = Buffer.from(
+  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+  "base64"
+);
+/** A JPEG header claiming 20000×20000 px — tiny file, would be 1.6 GB decoded. */
+const JPEG_HUGE = Buffer.from([
+  0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x4e, 0x20, 0x4e, 0x20, 0x03,
+  0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xff, 0xd9,
+]);
 const B = "http://test.local";
 
 let ipCounter = 0;
@@ -162,7 +171,7 @@ async function allowImageEdit(s: { viewer: string; owner: string }) {
 
 function pagesForm(n = 1) {
   const form = new FormData();
-  for (let i = 0; i < n; i++) form.append("page", new File([PNG_1PX], `p${i}.png`, { type: "image/png" }));
+  for (let i = 0; i < n; i++) form.append("page", new File([new Uint8Array(JPEG_1PX)], `p${i}.jpg`, { type: "image/jpeg" }));
   form.append("sizes", JSON.stringify(Array.from({ length: n }, () => [595, 842])));
   form.append("tools", JSON.stringify(["crop", "whiteout", "text"]));
   return form;
@@ -265,6 +274,16 @@ describe("shop-side editing", () => {
     notImage.append("sizes", "[[595,842]]");
     assert.equal((await editPages(req("/api/edit/pages", { method: "POST", body: notImage, headers: shop(s) }))).status, 415);
 
+    const png = new FormData();
+    png.append("page", new File([new Uint8Array(PNG_1PX)], "p.png"));
+    png.append("sizes", "[[595,842]]");
+    assert.equal((await editPages(req("/api/edit/pages", { method: "POST", body: png, headers: shop(s) }))).status, 415, "PNG decodes fully in memory — refused");
+
+    const huge = new FormData();
+    huge.append("page", new File([new Uint8Array(JPEG_HUGE)], "p.jpg"));
+    huge.append("sizes", "[[595,842]]");
+    assert.equal((await editPages(req("/api/edit/pages", { method: "POST", body: huge, headers: shop(s) }))).status, 413, "pixel cap");
+
     const badSize = pagesForm();
     badSize.set("sizes", "[[1,1]]");
     assert.equal((await editPages(req("/api/edit/pages", { method: "POST", body: badSize, headers: shop(s) }))).status, 400);
@@ -308,9 +327,14 @@ describe("shop-side editing", () => {
     assert.equal(cfg.document.permissions.copy, false);
     assert.ok(oo.verifyJwt(cfg.token, JWT_SECRET), "editor config is signed");
 
-    // The source URL works only for the Document Server (its JWT), not a browser.
-    assert.equal((await fetch(cfg.document.url)).status, 403);
-    const src = await fetch(cfg.document.url, { headers: { Authorization: `Bearer ${oo.signJwt({ payload: {} })}` } });
+    // The source URL works only for the Document Server's JWT for that exact URL.
+    const as = (token: string) => fetch(cfg.document.url, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal((await fetch(cfg.document.url)).status, 403, "no JWT");
+    assert.equal((await as(cfg.token)).status, 403, "the editor config token the shop's browser holds");
+    assert.equal((await as(oo.signJwt({ payload: {} }))).status, 403, "JWT naming no URL");
+    const otherUrl = cfg.document.url.replace(/t=[^&]+/, "t=someOtherReference");
+    assert.equal((await as(oo.signJwt({ payload: { url: otherUrl } }))).status, 403, "JWT for another file");
+    const src = await as(oo.signJwt({ payload: { url: cfg.document.url } }));
     assert.deepEqual(Buffer.from(await src.arrayBuffer()), DOCX);
 
     const callbackPath = cfg.editorConfig.callbackUrl.slice(appBase.length);
@@ -340,10 +364,12 @@ describe("shop-side editing", () => {
       { rotate: 90, offsetXmm: -5, offsetYmm: 0, scalePct: 100, fit: "fit", paper: "A4", include: true, grayscale: false },
       { rotate: 0, offsetXmm: 999, offsetYmm: 0, scalePct: 100, fit: "fit", paper: "A4", include: false, grayscale: true },
     ];
-    const r = await printAttempt(req("/api/print-attempt", json({ layout }, shop(s))));
+    const pageMm = [[210, 297], [210, 297]];
+    const r = await printAttempt(req("/api/print-attempt", json({ layout, pageMm }, shop(s))));
     assert.equal(r.status, 200);
     const log = await AuditLog.findOne({ sessionId: (await doc(s))._id, event: "print_attempt" });
     assert.deepEqual(log.meta.layout.skipped, [2]);
+    assert.deepEqual(log.meta.layout.offPaper, [1], "rotated A4 page on portrait A4 shifted 5 mm overhangs");
     assert.equal(log.meta.layout.changed.p1.rotate, 90);
     assert.equal(log.meta.layout.changed.p2.offsetXmm, 40, "clamped");
     // A print attempt without a body still works and logs no layout.

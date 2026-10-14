@@ -4,7 +4,7 @@
  * and the session token never enters this process.
  */
 import * as pdfjsLib from "./vendor/pdf.min.mjs";
-import { composePage, defaultAdjust, isDefault, rotatedSize } from "./vendor/pageAdjust.js";
+import { composePage, defaultAdjust, isDefault, isOffPaper, rotatedSize } from "./vendor/pageAdjust.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 
@@ -271,8 +271,15 @@ function renderLayoutPanel() {
   $("layout-skip-wrap").hidden = layoutTarget === "all";
   $("layout-skip").checked = !shown.include;
   const included = layout.filter((a) => a.include).length;
+  const offPaper = layout.flatMap((a, i) =>
+    a.include && isOffPaper([pristine[i].widthMm, pristine[i].heightMm], a) ? [i + 1] : []
+  );
+  $("layout-offpaper").hidden = offPaper.length === 0;
+  $("layout-offpaper").textContent =
+    `Part of page ${offPaper.join(", ")} falls off the paper and won't print. Move it back or use Reset.`;
   $("layout-note").textContent =
-    `Layout never changes what pages say. Printing ${included} of ${pristine.length} page${pristine.length > 1 ? "s" : ""}.`;
+    `Layout turns, moves and shrinks pages on paper; it is logged with the print. ` +
+    `Printing ${included} of ${pristine.length} page${pristine.length > 1 ? "s" : ""}.`;
 }
 
 /** Paper + orientation for the silent print job (one setting per document). */
@@ -430,6 +437,7 @@ $("print-btn").addEventListener("click", async () => {
     const result = await window.agent.print({
       printerName: $("printer-select").value,
       layout,
+      pageMm: pristine.map((p) => [p.widthMm, p.heightMm]),
       ...printPageSetup(),
     });
     if (!result.ok) {

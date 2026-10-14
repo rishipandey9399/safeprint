@@ -6,12 +6,21 @@ import { findVerifiedSession } from "@/lib/shopAuth";
 import { getClientIp } from "@/lib/rateLimit";
 import { clampAdjust, summarizeAdjust } from "@/lib/pageAdjust";
 
-/** Optional `{ layout: Adjust[] }` body: the print-layout changes, for the audit log only. */
+const isMm = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n > 0 && n < 5000;
+
+/**
+ * Optional `{ layout: Adjust[], pageMm?: [w, h][] }` body: the print-layout
+ * changes (and, with page sizes, pages whose content was pushed off the
+ * paper), for the audit log only.
+ */
 async function readLayout(req: Request) {
   try {
-    const body = (await req.json()) as { layout?: unknown };
+    const body = (await req.json()) as { layout?: unknown; pageMm?: unknown };
     if (!Array.isArray(body.layout) || body.layout.length > 500) return null;
-    return summarizeAdjust(body.layout.map(clampAdjust));
+    const pageMm = Array.isArray(body.pageMm)
+      ? body.pageMm.map((p) => (Array.isArray(p) && p.length === 2 && p.every(isMm) ? (p as [number, number]) : undefined))
+      : undefined;
+    return summarizeAdjust(body.layout.map(clampAdjust), pageMm);
   } catch {
     return null;
   }

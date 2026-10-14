@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
 import { wordEditingEnabled } from "@/lib/config";
 import { readBlob } from "@/lib/blobs";
-import { openRef, readDocServerJwt, type FileRef } from "@/lib/onlyoffice";
+import { authorizeFileFetch, openRef, type FileRef } from "@/lib/onlyoffice";
 
 export const runtime = "nodejs";
 
 /**
  * Serves a Word source file to the ONLYOFFICE Document Server only. Needs
- * BOTH a sealed short-lived reference (minted by this app, never shown to a
- * browser) and the Document Server's signed JWT. Not linked from any page.
+ * BOTH a sealed short-lived reference and a Document Server JWT signed for
+ * that exact reference. The shop's browser sees the reference inside the
+ * editor config, but cannot mint a matching JWT (the secret is server-side).
  */
 export async function GET(req: Request): Promise<NextResponse> {
-  if (!wordEditingEnabled() || !readDocServerJwt(req)) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
-  const ref = openRef<FileRef>(new URL(req.url).searchParams.get("t") ?? "");
+  const t = wordEditingEnabled() ? authorizeFileFetch(req) : null;
+  if (!t) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  const ref = openRef<FileRef>(t);
   if (!ref?.blob?.key) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
 
   let plain: Buffer;

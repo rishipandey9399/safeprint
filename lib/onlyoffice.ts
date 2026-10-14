@@ -39,7 +39,8 @@ export function verifyJwt(token: string, secret = config.onlyofficeJwtSecret): R
     if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
     if (typeof payload !== "object" || payload === null) return null;
-    if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) return null;
+    // Every token must expire: ours always carry exp, and so do the Document Server's.
+    if (typeof payload.exp !== "number" || payload.exp * 1000 < Date.now()) return null;
     return payload;
   } catch {
     return null;
@@ -52,10 +53,41 @@ export function readDocServerJwt(req: Request, body?: Record<string, unknown>): 
   const headerToken = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const bodyToken = typeof body?.token === "string" ? body.token : "";
   const decoded = verifyJwt(bodyToken || headerToken);
-  if (!decoded) return null;
+  if (!decoded || isEditorConfigToken(decoded)) return null;
   // Header tokens wrap the request body under `payload`; body tokens are the body.
   const inner = decoded.payload;
   return typeof inner === "object" && inner !== null ? (inner as Record<string, unknown>) : decoded;
+}
+
+/**
+ * The editor config we sign is handed to the shop's browser, so a token that
+ * looks like one must never pass as a Document Server request.
+ */
+function isEditorConfigToken(decoded: Record<string, unknown>): boolean {
+  return "document" in decoded || "editorConfig" in decoded;
+}
+
+/**
+ * Authorizes a Document Server file download. The Document Server signs
+ * `{ payload: { url } }` with the exact URL it is fetching, so the token must
+ * name this very sealed reference — any other token signed with the shared
+ * secret (e.g. the editor config the shop's browser holds) is refused.
+ */
+export function authorizeFileFetch(req: Request): string | null {
+  const t = new URL(req.url).searchParams.get("t");
+  if (!t) return null;
+  const auth = req.headers.get("authorization") ?? "";
+  const decoded = verifyJwt(auth.startsWith("Bearer ") ? auth.slice(7) : "");
+  if (!decoded || isEditorConfigToken(decoded)) return null;
+  const inner = decoded.payload as { url?: unknown } | undefined;
+  if (typeof inner?.url !== "string") return null;
+  try {
+    const signed = new URL(inner.url);
+    if (signed.pathname !== "/api/onlyoffice/file" || signed.searchParams.get("t") !== t) return null;
+  } catch {
+    return null;
+  }
+  return t;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +227,12 @@ export function docKeyFor(session: ISession): string {
   return `sp${String(session._id)}r${session.editRounds}`;
 }
 
+// The Document Server fetches the source once when the editor opens.
+const EDITOR_FILE_TTL_SECONDS = 600;
+
 export function editorConfig(session: ISession, base: string, shopName: string) {
   const ext = session.sourceExt ?? "docx";
+  // The callback must stay valid for as long as the edit can last.
   const ttl = config.sessionTtlSeconds + config.editTtlExtensionSeconds;
   const callback: CallbackRef = { sid: String(session._id), round: session.editRounds };
   const cfg = {
@@ -208,7 +244,7 @@ export function editorConfig(session: ISession, base: string, shopName: string) 
       fileType: ext,
       key: docKeyFor(session),
       title: session.fileName,
-      url: fileUrlFor(base, session.source!, ext, ttl),
+      url: fileUrlFor(base, session.source!, ext, EDITOR_FILE_TTL_SECONDS),
       permissions: {
         edit: true,
         download: false,

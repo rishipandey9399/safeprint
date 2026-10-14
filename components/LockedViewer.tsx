@@ -4,7 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import RubberStamp from "./RubberStamp";
 import { renderPages, wipe, type RenderedPage } from "@/lib/pdfRender";
-import { composePage, defaultAdjust, isDefault, rotatedSize, type Adjust, type Paper } from "@/lib/pageAdjust";
+import {
+  composePage,
+  defaultAdjust,
+  isDefault,
+  isOffPaper,
+  MAX_SCALE,
+  rotatedSize,
+  type Adjust,
+  type Paper,
+} from "@/lib/pageAdjust";
 import type { EditedPage } from "./ImageEditor";
 
 // Editors load only when a customer has allowed an edit.
@@ -269,6 +278,11 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
   const paper = layout[0]?.paper ?? "auto";
   const included = layout.filter((a) => a.include).length;
   const layoutChanged = layout.some((a) => !isDefault(a));
+  const pageMm = (): [number, number][] => pristineRef.current.map((p) => [p.widthMm, p.heightMm]);
+  const offPaper = layout.flatMap((a, i) => {
+    const p = pristineRef.current[i];
+    return p && a.include && isOffPaper([p.widthMm, p.heightMm], a) ? [i + 1] : [];
+  });
 
   const nudge = (dx: number, dy: number) =>
     updateLayout((a) => ({
@@ -304,7 +318,7 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
       const res = await fetch("/api/print-attempt", {
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ layout }),
+        body: JSON.stringify({ layout, pageMm: pageMm() }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -599,7 +613,13 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
       )}
 
       {editPhase === "image" && (
-        <ImageEditor pages={pristineRef.current} busy={busy} onSubmit={submitImageEdit} onCancel={cancelEdit} />
+        <ImageEditor
+          pages={pristineRef.current}
+          watermark={`SAFEPRINT · SP-${shareCode}`}
+          busy={busy}
+          onSubmit={submitImageEdit}
+          onCancel={cancelEdit}
+        />
       )}
 
       {(editPhase === "word" || editPhase === "saving") && wordEditor && (
@@ -655,7 +675,7 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
               <input
                 type="range"
                 min={25}
-                max={200}
+                max={MAX_SCALE}
                 step={1}
                 value={shown.scalePct}
                 onChange={(e) => updateLayout(() => ({ scalePct: Number(e.target.value) }))}
@@ -702,8 +722,14 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
               Reset
             </button>
           </div>
+          {offPaper.length > 0 && (
+            <p className="error" role="status">
+              Part of page {offPaper.join(", ")} falls off the paper and won&apos;t print. Move it back or use Reset.
+            </p>
+          )}
           <p className="field-note">
-            Layout changes how pages sit on paper — it never changes what they say. Printing {included} of {pageCount} page
+            Layout turns, moves and shrinks pages on paper; it is logged with the print. Changing what a page says
+            needs the customer&apos;s approval (Edit). Printing {included} of {pageCount} page
             {pageCount > 1 ? "s" : ""}.
           </p>
         </div>

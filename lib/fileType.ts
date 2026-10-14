@@ -42,3 +42,33 @@ export function sniffFile(buf: Buffer): SniffResult {
   }
   return { kind: "rejected", reason: "unsupported file type" };
 }
+
+/**
+ * Pixel size of a baseline/progressive JPEG, read from its SOF marker without
+ * decoding anything. Null if the stream has no frame header.
+ */
+export function jpegSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) return null;
+    const marker = buf[i + 1];
+    if (marker === 0xff) {
+      i++; // fill byte
+      continue;
+    }
+    // Standalone markers carry no length.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      i += 2;
+      continue;
+    }
+    const len = buf.readUInt16BE(i + 2);
+    // SOF0–SOF15, excluding DHT (C4), JPG (C8) and DAC (CC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+    }
+    if (marker === 0xda) return null; // start of scan before any frame header
+    i += 2 + len;
+  }
+  return null;
+}
