@@ -1,0 +1,125 @@
+# SafePrint production stack for ONE server (Oracle Cloud Always Free Ampere
+# VM, arm64 — also runs on amd64). See deploy/oracle/README.md.
+#
+#   cp env.example .env   # fill in domains + secrets
+#   docker compose up -d --build
+#
+# Only Caddy is reachable from outside (ports 80/443). Everything else talks
+# on the private compose network.
+name: safeprint
+
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env}
+      DOCS_DOMAIN: ${DOCS_DOMAIN:?set DOCS_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      default:
+        # The app calls the Document Server at its public https name; these
+        # aliases keep that traffic inside the server instead of leaving
+        # through the public IP and coming back.
+        aliases:
+          - ${APP_DOMAIN}
+          - ${DOCS_DOMAIN}
+    depends_on: [app, onlyoffice]
+
+  app:
+    build:
+      context: ../..
+    image: safeprint-app:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env}
+      MONGODB_URI: mongodb://safeprint:${MONGO_APP_PASSWORD}@mongo:27017/safeprint?authSource=safeprint
+      STORAGE_DRIVER: local
+      LOCAL_STORE_DIR: /data/store
+      ONLYOFFICE_URL: https://${DOCS_DOMAIN}
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      # The Document Server fetches files and posts edits straight to the app
+      # over the private network.
+      SAFEPRINT_INTERNAL_URL: http://app:3000
+      # Caddy is the only proxy in front and replaces any client-sent
+      # X-Forwarded-For, so the rightmost entry is the real client.
+      TRUST_PROXY_HOPS: "1"
+    # Optional tuning (session length, rate limits, ...): put any setting
+    # from the main .env.example in app.env next to this file.
+    env_file:
+      - path: app.env
+        required: false
+    volumes:
+      - store:/data/store
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    # A small cache is plenty for SafePrint's few small collections and
+    # leaves the RAM to the Document Server.
+    command: ["--wiredTigerCacheSizeGB", "0.5"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}
+    volumes:
+      - mongo:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  onlyoffice:
+    image: onlyoffice/documentserver:8.3.3
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+      # Needed so it can reach http://app:3000 on the private network. It only
+      # ever fetches URLs inside JWT-signed requests from the app.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    volumes:
+      # Short cache lifetime: no working copies of customers' files kept
+      # around for the default 24 hours.
+      - ../onlyoffice/local-production-linux.json:/etc/onlyoffice/documentserver/local-production-linux.json:ro
+
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://root:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE in .env}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-21}
+      # Optional off-server copy (Oracle Object Storage, S3-compatible).
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+    volumes:
+      - backups:/backups
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
+  store:
+  mongo:
+  backups:

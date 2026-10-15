@@ -20,3 +20,6 @@ next-env.d.ts
 skills-lock.json
 .claude/settings.local.json
 .claude/skills/
+
+# production server-only settings
+deploy/oracle/app.env

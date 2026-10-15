@@ -232,6 +232,19 @@ That is why editing needs the citizen's Allow first and their approval of the re
 | Word upload (→ PDF) and Word editing | Real, working with a self-hosted ONLYOFFICE Document Server (`docker-compose.yml`) |
 | Photo/page editor, layout tools, edit consent + review | Real, working (browser portal). The agent has the layout tools; editing happens in the browser portal |
 
+## Deploying (free, on Oracle Cloud in India)
+
+`deploy/oracle/` runs the whole product on **one Oracle Cloud Always Free server** in
+Hyderabad or Mumbai, with no time limit and ₹0 hosting cost. It includes:
+- the app, built from the root `Dockerfile`
+- MongoDB
+- the ONLYOFFICE Word editor
+- automatic HTTPS with Caddy
+- nightly encrypted database backups to Oracle Object Storage
+
+Follow **[deploy/oracle/README.md](deploy/oracle/README.md)**. It covers signing up,
+creating the server, DNS, `docker compose up -d --build`, backups, restore and updates.
+
 ## SafePrint Agent (desktop app — closes the Save-as-PDF hole)
 
 The browser portal cannot control the OS print dialog. The **SafePrint Agent** (`agent/`,

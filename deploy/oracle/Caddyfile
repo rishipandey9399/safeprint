@@ -1,0 +1,16 @@
+# Automatic HTTPS (Let's Encrypt) for both public names.
+{
+	email {$ACME_EMAIL}
+}
+
+# SafePrint web app. Caddy replaces any client-sent X-Forwarded-For with the
+# real client address, which is what TRUST_PROXY_HOPS=1 expects.
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+# ONLYOFFICE Document Server (Word conversion + editor; websockets included).
+{$DOCS_DOMAIN} {
+	reverse_proxy onlyoffice:80
+}

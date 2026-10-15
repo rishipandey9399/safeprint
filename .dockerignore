@@ -1,0 +1,17 @@
+.git
+node_modules
+.next
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.safeprint-store
+agent
+tests
+deploy
+.claude
+.agents
+skills-lock.json
+README.md
+Dockerfile
+docker-compose.yml

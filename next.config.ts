@@ -10,6 +10,8 @@ const noStoreHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Self-contained server bundle for the Docker image (deploy/oracle).
+  output: "standalone",
   // SafePrint serves no optimized images; switching the optimizer off removes
   // the /_next/image endpoint and its attack surface entirely.
   images: { unoptimized: true },
