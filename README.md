@@ -101,8 +101,16 @@ extra. To customize, copy `.env.example` to `.env`:
 | `WORD_CONVERSION_CONCURRENCY` | `2` | Word conversions running at once (per app process) |
 | `WORD_CONVERSION_QUEUE` | `10` | Further Word uploads allowed to wait; beyond that they get **503 "busy, try again"** |
 | `WORD_CONVERSION_WAIT_MS` | `20000` | How long a waiting Word upload waits for a slot before getting 503 |
-| `TRUST_PROXY_HOPS` | `1` | Proxies in front of the app that **append** to `X-Forwarded-For` (nginx `$proxy_add_x_forwarded_for`, a load balancer). The client IP is taken that many entries **from the right**; the client-supplied left part is never trusted. `2` for CDN → LB → app; `0` if nothing is in front (then all clients share one rate-limit bucket — don't expose `next start` directly) |
-| `VERIFY_GLOBAL_MISS_LIMIT` | `300` | Failed OTP checks per minute, service-wide, before verification **without a counter key** pauses for a minute (registered counters are never braked) |
+| `TRUST_PROXY_HOPS` | `1` | Proxies in front of the app that **append** to `X-Forwarded-For` (nginx `$proxy_add_x_forwarded_for`, a load balancer). The client IP is taken that many entries **from the right**; the client-supplied left part is never trusted. nginx or one load balancer: `1`; Cloud Run behind a Google external load balancer, or a CDN in front of a load balancer: `2`; nothing in front: `0` (then all clients share one rate-limit bucket — don't expose `next start` directly). Production logs a warning when it's unset. **Always run behind a proxy**: exposed directly, Next.js keeps a client-sent `X-Forwarded-For`, so no setting can stop forged IPs |
+| `VERIFY_GLOBAL_MISS_LIMIT` | `300` | Failed OTP checks per minute, service-wide, before verification pauses for a minute — for everyone except a counter opening a session paired **to it** |
+| `VERIFY_COUNTER_MISS_LIMIT` | `30` | Failed checks per minute by any one registered counter on sessions that aren't its own (registration is open, so a counter key earns no scanning exemption) |
+| `VERIFY_FAIL_FLOOR_MS` | `250` | Every failure a stranger can see takes at least this long (+ up to 20% jitter), so response time can't reveal whether a share code exists |
+| `LIMIT_UPLOAD_PER_IP_HOUR` | `60` | Uploads per IP per hour. Sized for mobile carriers that put many phones behind one IP (CGNAT) |
+| `LIMIT_UPLOAD_PER_DEVICE_HOUR` | `10` | Uploads per browser per hour (a random device id the citizen's browser keeps; advisory — the per-IP limit is the hard cap) |
+| `LIMIT_WORD_UPLOAD_PER_IP_HOUR` | `20` | Word uploads per IP per hour |
+| `LIMIT_VERIFY_PER_IP_MINUTE` | `60` | OTP checks per IP per minute |
+| `LIMIT_STATUS_STREAM_PER_IP_MINUTE` | `120` | Live-status streams opened per IP per minute |
+| `LIMIT_SHOP_LOOKUP_PER_IP_MINUTE` | `120` | Counter-code lookups (QR scans) per IP per minute |
 | `SESSION_RETENTION_DAYS` | `30` | Ended sessions keep a scrubbed record (no file name) this long, then MongoDB deletes it (TTL) |
 | `AUDIT_RETENTION_DAYS` | `90` | Audit entries (they carry client IPs) expire after this. Changing it later needs a `collMod` on the `at_1` index |
 
@@ -122,17 +130,23 @@ extra. To customize, copy `.env.example` to `.env`:
   `Cache-Control: no-store` + `Content-Disposition: inline` on every API response; no
   `<a>/<img>/<embed>/<iframe>` elements; `user-select: none`; right-click/copy/drag/Ctrl+S/Ctrl+P
   suppressed. Print uses `@media print` CSS so only the canvases reach the print dialog.
-- **Rate limits**: 10 uploads/hour/IP, 15 OTP checks/min/IP, 30 renders/min/IP, 5 counter
-  registrations/hour/IP, 30 status streams/min/IP (max 3 open per session), plus per-session caps
+- **Rate limits** (citizen-facing ones sized for carrier NAT, all overridable — see the table above):
+  60 uploads/hour/IP and 10/hour/device, 60 OTP checks/min/IP, 30 renders/min/IP, 5 counter
+  registrations/hour/IP, 120 status streams/min/IP (max 3 open per session), plus per-session caps
   (5 OTP tries, 5 OTP regenerations, 2 print attempts, 20 render fetches). Client IPs come only
   from the hop our own proxy appended (`TRUST_PROXY_HOPS`), so a forged `X-Forwarded-For` can't
   dodge them. Redis-backed when `REDIS_URL` is set (in-memory limits are per process).
 - **No share-code oracle**: `/api/verify-otp` answers every failure a stranger could probe
   (unknown code, another counter's session, wrong/expired OTP, lockout) with the same
-  `401 "Wrong code or OTP."`; only the paired counter gets specific messages for its own sessions.
-  Each share code allows 5 checks/minute whatever the IP, and once failed checks pass
-  `VERIFY_GLOBAL_MISS_LIMIT`/minute service-wide, unpaired verification pauses — scanning for live
-  codes (to lock other people's sessions) is impractical, and registered counters are unaffected.
+  `401 "Wrong code or OTP."` **in the same time** (a 250 ms floor plus jitter — measured: a timing
+  classifier that was right 88% of the time before is at chance, ~50%, after); only the paired
+  counter gets specific messages for its own sessions. Everyone except a counter opening its own
+  paired session is braked: 5 checks/minute per share code whatever the IP, 30 misses/minute per
+  registered counter, and a service-wide miss budget (`VERIFY_GLOBAL_MISS_LIMIT`) — scanning for
+  live codes (to lock other people's sessions) is impractical. A stranger hammering a share code
+  can't lock its own counter out. (For an *unpaired* session, someone who already knows the code
+  can still use up its 5 guesses — the brute-force protection — so share codes are said only to the
+  shop.)
 - **Bounded uploads**: request bodies are refused on `Content-Length` and cut off while
   streaming once past the limit, before anything is parsed — an oversized upload can't exhaust
   server memory.
@@ -140,7 +154,9 @@ extra. To customize, copy `.env.example` to `.env`:
   only third-party origin is your ONLYOFFICE server, when configured), `frame-ancestors 'none'`,
   HSTS in production, `Referrer-Policy: no-referrer`, a locked-down `Permissions-Policy`. In
   production `ONLYOFFICE_URL` must be `https://` (its script runs inside the shop's page). The
-  unused Next.js image optimizer is disabled.
+  unused Next.js image optimizer is disabled. `style-src` keeps `'unsafe-inline'` (React style
+  attributes and the editors' overlays need it); with scripts locked down this allows only CSS
+  injection, and no secrets live in DOM attributes for CSS to read.
 - **Audit log** per session: upload, OTP failures/success/regeneration, approval
   requested/granted/denied/timed out, renders, print attempts, confirmation, deletion, expiry —
   each with timestamp + IP (+ counter id) (`auditlogs` collection). Uploads are logged by file type
@@ -231,7 +247,9 @@ entirely:
   print time, so a spoofed request from the UI is rejected too.
 - **HTTPS-only servers** — the agent refuses `http://` server addresses (they would carry the
   counter's device key, the session token and document bytes in clear), except a server on the
-  same machine (`localhost`/`127.0.0.1`) for testing. Built on Electron 44.
+  same machine (`localhost`/`127.0.0.1`) for testing. A counter saved earlier with an `http://`
+  address is not used; the setup screen says why and asks for the `https://` address. Built on
+  Electron 44.
 - **Screenshot/screen-capture blocking** — `setContentProtection(true)`: the window renders
   black in captures and screen shares on **Windows** (`SetWindowDisplayAffinity`) and **macOS**
   (`NSWindowSharingNone`). **Linux has no OS API for this** — documented gap.

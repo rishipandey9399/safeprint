@@ -68,9 +68,18 @@ let counter = null; // { server, deviceKey, shopCode, name, area }
 function counterFile() {
   return path.join(app.getPath("userData"), "counter.json");
 }
+// Why a saved counter couldn't be used (shown on the setup screen).
+let counterNotice = "";
+
 function loadCounter() {
   try {
     const c = JSON.parse(fs.readFileSync(counterFile(), "utf8"));
+    if (c && c.server && !parseServer(c.server)) {
+      counterNotice =
+        `This counter was set up with an insecure address (${c.server}). ` +
+        "Set it up again with the server's https:// address.";
+      return null;
+    }
     if (c && parseServer(c.server) && /^[a-f0-9]{64}$/.test(c.deviceKey) && c.shopCode) return c;
   } catch {
     /* not registered yet */
@@ -78,13 +87,14 @@ function loadCounter() {
   return null;
 }
 function saveCounter(c) {
+  counterNotice = "";
   if (c) fs.writeFileSync(counterFile(), JSON.stringify(c), { mode: 0o600 });
   else fs.rmSync(counterFile(), { force: true });
   counter = c;
 }
 
 async function publicCounterInfo() {
-  if (!counter) return { registered: false };
+  if (!counter) return { registered: false, notice: counterNotice };
   const pairUrl = `${counter.server}/?shop=${counter.shopCode}`;
   const qrSvg = await QRCode.toString(pairUrl, {
     type: "svg",

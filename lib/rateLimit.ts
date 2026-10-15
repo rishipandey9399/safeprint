@@ -105,7 +105,10 @@ export async function isLimited(key: string, max: number, windowMs: number): Pro
  * one nginx / load balancer in front). The leftmost entry is attacker-chosen
  * and must never be used. With 0 hops (no proxy) the header is ignored
  * entirely; route handlers can't see the socket address, so every client
- * then shares one bucket — run behind a proxy in production.
+ * then shares one bucket — run behind a proxy in production. (Exposed
+ * directly, Next's server fills in X-Forwarded-For with the socket address
+ * only when the client sent none, and keeps a client-sent one — so a direct
+ * deployment can't tell real from forged.)
  */
 export function getClientIp(req: Request): string {
   const hops = config.trustProxyHops;

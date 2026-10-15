@@ -23,7 +23,14 @@ const MULTIPART_OVERHEAD = 256 * 1024;
 
 export async function POST(req: Request): Promise<NextResponse> {
   const ip = getClientIp(req);
-  if (!(await rateLimit(`upload:${ip}`, 10, 60 * 60 * 1000))) {
+  // Device id: a random id the citizen's browser keeps; advisory only (a client
+  // can rotate it), so the per-IP ceiling remains the hard cap.
+  const device = req.headers.get("x-safeprint-device") ?? "";
+  const deviceOk = /^[0-9a-f-]{36}$/i.test(device);
+  if (
+    !(await rateLimit(`upload:${ip}`, config.limits.uploadPerIpHour, 60 * 60 * 1000)) ||
+    (deviceOk && !(await rateLimit(`upload-device:${device}`, config.limits.uploadPerDeviceHour, 60 * 60 * 1000)))
+  ) {
     return NextResponse.json({ error: "Too many uploads. Try again later." }, { status: 429 });
   }
 
@@ -61,7 +68,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         { status: 415 }
       );
     }
-    if (!(await rateLimit(`upload-word:${ip}`, 5, 60 * 60 * 1000))) {
+    if (!(await rateLimit(`upload-word:${ip}`, config.limits.wordUploadPerIpHour, 60 * 60 * 1000))) {
       return NextResponse.json({ error: "Too many Word uploads. Try again later." }, { status: 429 });
     }
   }

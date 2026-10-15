@@ -12,6 +12,8 @@ process.env.MONGODB_URI ??= "mongodb://127.0.0.1:27017/safeprint_test";
 process.env.LOCAL_STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "safeprint-test-"));
 delete process.env.SAFEPRINT_AUTO_APPROVE;
 delete process.env.REDIS_URL;
+// Keep the anti-timing floor short in tests (a dedicated test raises it).
+process.env.VERIFY_FAIL_FLOOR_MS = "20";
 
 const PDF = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
 const B = "http://test.local";
@@ -255,6 +257,76 @@ describe("SafePrint session flow", () => {
       idx.find((i) => i.key[field] === 1 && i.expireAfterSeconds !== undefined)?.expireAfterSeconds;
     assert.equal(ttl(await Session.collection.indexes() as never, "purgeAt"), 0);
     assert.equal(ttl(await AuditLog.collection.indexes() as never, "at"), 90 * 86400);
+  });
+
+  test("a self-registered counter key earns no scanning exemption", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const { config } = await import("@/lib/config");
+    const saved = config.verifyPerCounterMissesPerMinute;
+    config.verifyPerCounterMissesPerMinute = 3;
+    try {
+      const scanner = await newShop(); // anyone can register one
+      const statuses = [];
+      for (const c of ["QQQQQ2", "QQQQQ3", "QQQQQ4", "QQQQQ5"]) {
+        statuses.push((await verifyReq(c, "123456", scanner.deviceKey)).status);
+      }
+      assert.deepEqual(statuses, [401, 401, 401, 429]);
+    } finally {
+      config.verifyPerCounterMissesPerMinute = saved;
+    }
+  });
+
+  test("a stranger hammering a share code can't lock its own counter out", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const shop = await newShop();
+    const s = await newUpload(shop.shopCode);
+    const junk = [];
+    for (let i = 0; i < 6; i++) junk.push((await verifyReq(s.shareCode, "000000")).status);
+    assert.equal(junk.at(-1), 429, "the stranger is braked");
+    const v = await verifyReq(s.shareCode, s.otp, shop.deviceKey);
+    assert.equal(v.status, 200, "the paired counter still opens it");
+  });
+
+  test("unknown and real codes take the same time to fail", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const { config } = await import("@/lib/config");
+    const saved = config.verifyFailFloorMs;
+    config.verifyFailFloorMs = 150;
+    try {
+      const s = await newUpload();
+      const wrong = s.otp === "000000" ? "111111" : "000000";
+      const time = async (code: string) => {
+        const t0 = performance.now();
+        const r = await verifyReq(code, wrong);
+        assert.equal(r.status, 401);
+        return performance.now() - t0;
+      };
+      for (const ms of [await time("WWWWW2"), await time(s.shareCode)]) {
+        assert.ok(ms >= 145 && ms < 400, `failure took ${ms.toFixed(0)}ms, expected the ~150ms floor`);
+      }
+    } finally {
+      config.verifyFailFloorMs = saved;
+    }
+  });
+
+  test("uploads are limited per device as well as per IP", async (t) => {
+    if (!mongoUp) return t.skip("MongoDB not reachable");
+    const { config } = await import("@/lib/config");
+    const saved = config.limits.uploadPerDeviceHour;
+    config.limits.uploadPerDeviceHour = 2;
+    try {
+      const deviceA = crypto.randomUUID();
+      const send = (device: string) => {
+        const form = new FormData();
+        form.append("file", new File([PDF], "a.pdf"));
+        return upload(req("/api/upload", { method: "POST", body: form, headers: { "X-SafePrint-Device": device } }));
+      };
+      const codes = [(await send(deviceA)).status, (await send(deviceA)).status, (await send(deviceA)).status];
+      assert.deepEqual(codes, [200, 200, 429]);
+      assert.equal((await send(crypto.randomUUID())).status, 200, "another phone is unaffected");
+    } finally {
+      config.limits.uploadPerDeviceHour = saved;
+    }
   });
 
   test("unknown shop code is rejected at upload", async (t) => {

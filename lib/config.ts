@@ -29,6 +29,16 @@ if (isProduction && !isBuildPhase && process.env.ONLYOFFICE_URL) {
   }
 }
 
+// The client IP (rate limits, audit) depends on how many proxies sit in front.
+// The default of 1 is right for nginx or a single load balancer, wrong with
+// no proxy (forgeable) or two (everyone shares one IP) — make it explicit.
+if (isProduction && !isBuildPhase && process.env.TRUST_PROXY_HOPS === undefined) {
+  console.warn(
+    "[SafePrint] TRUST_PROXY_HOPS is not set; assuming 1 proxy in front. Set it explicitly " +
+      "(nginx / single load balancer: 1, CDN or Google LB in front of Cloud Run: 2). See README."
+  );
+}
+
 const masterKey = process.env.MASTER_KEY
   ? Buffer.from(process.env.MASTER_KEY, "hex")
   : DEV_MASTER_KEY;
@@ -36,6 +46,11 @@ const masterKey = process.env.MASTER_KEY
 if (masterKey.length !== 32) {
   throw new Error("MASTER_KEY must be 64 hex characters (32 bytes)");
 }
+
+const envInt = (name: string, dflt: number) => {
+  const v = parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(v) && v > 0 ? v : dflt;
+};
 
 export const config = {
   mongoUri: process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27017/safeprint",
@@ -73,8 +88,25 @@ export const config = {
   // Failed OTP checks per minute across the whole service (requests without a
   // counter key) before unpaired verification pauses — stops share-code scanning.
   verifyGlobalMissesPerMinute: parseInt(process.env.VERIFY_GLOBAL_MISS_LIMIT ?? "300", 10),
+  // Per-IP limits. Citizens on mobile data often share one carrier IP (CGNAT),
+  // so citizen-facing limits are generous per IP and paired with a tighter
+  // per-device limit where a device id exists; shop-facing ones stay tight.
+  limits: {
+    uploadPerIpHour: envInt("LIMIT_UPLOAD_PER_IP_HOUR", 60),
+    uploadPerDeviceHour: envInt("LIMIT_UPLOAD_PER_DEVICE_HOUR", 10),
+    wordUploadPerIpHour: envInt("LIMIT_WORD_UPLOAD_PER_IP_HOUR", 20),
+    verifyPerIpMinute: envInt("LIMIT_VERIFY_PER_IP_MINUTE", 60),
+    statusStreamPerIpMinute: envInt("LIMIT_STATUS_STREAM_PER_IP_MINUTE", 120),
+    shopLookupPerIpMinute: envInt("LIMIT_SHOP_LOOKUP_PER_IP_MINUTE", 120),
+  },
+  // Failed checks per minute by any one registered counter on sessions that
+  // aren't its own (registration is open, so a key earns no exemption).
+  verifyPerCounterMissesPerMinute: parseInt(process.env.VERIFY_COUNTER_MISS_LIMIT ?? "30", 10),
   // OTP checks per minute against any single share code, whatever the IP.
   verifyPerCodePerMinute: 5,
+  // Minimum time every stranger-visible failure takes (plus up to 20% jitter),
+  // so response time can't reveal whether a share code exists.
+  verifyFailFloorMs: Math.max(0, parseInt(process.env.VERIFY_FAIL_FLOOR_MS ?? "250", 10) || 0),
   // Ended sessions keep a scrubbed record (no file name) this long, then are
   // deleted by a TTL index; audit entries likewise. Days.
   sessionRetentionDays: Math.max(1, parseInt(process.env.SESSION_RETENTION_DAYS ?? "30", 10) || 30),

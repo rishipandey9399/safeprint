@@ -81,6 +81,21 @@ function saveStored(s: ActiveSession | null) {
   }
 }
 
+// A random id for this browser, so upload limits can be per device rather
+// than per IP — many phones on mobile data share one carrier IP.
+function deviceHeader(): Record<string, string> {
+  try {
+    let id = localStorage.getItem("safeprint.device");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("safeprint.device", id);
+    }
+    return { "X-SafePrint-Device": id };
+  } catch {
+    return {};
+  }
+}
+
 export default function UploadPage() {
   const [phase, setPhase] = useState<"idle" | "uploading" | "active">("idle");
   const [session, setSession] = useState<ActiveSession | null>(null);
@@ -137,7 +152,7 @@ export default function UploadPage() {
       const form = new FormData();
       form.append("file", file);
       if (shop) form.append("shopCode", shop.shopCode);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await fetch("/api/upload", { method: "POST", body: form, headers: deviceHeader() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed.");
       setLive(null);

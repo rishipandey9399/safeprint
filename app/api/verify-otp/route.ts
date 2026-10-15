@@ -22,10 +22,21 @@ const FAIL = { error: "Wrong code or OTP." };
 const fail = () => NextResponse.json(FAIL, { status: 401 });
 const BUSY = { error: "Too many attempts. Wait a minute and try again." };
 const MISS_KEY = "verify-miss:global";
+const counterMissKey = (shopId: unknown) => `verify-miss:counter:${String(shopId)}`;
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const started = performance.now();
+  // Failures a stranger can see all take the same time: a real code with a
+  // wrong OTP does database writes, an unknown code doesn't, and without this
+  // floor the difference reveals which codes are live.
+  const padded = async (res: NextResponse) => {
+    const floor = config.verifyFailFloorMs;
+    const wait = floor - (performance.now() - started) + Math.random() * (floor / 5);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    return res;
+  };
   const ip = getClientIp(req);
-  if (!(await rateLimit(`verify:${ip}`, 15, 60 * 1000))) {
+  if (!(await rateLimit(`verify:${ip}`, config.limits.verifyPerIpMinute, 60 * 1000))) {
     return NextResponse.json(BUSY, { status: 429 });
   }
 
@@ -45,22 +56,6 @@ export async function POST(req: Request): Promise<NextResponse> {
   await connectDb();
   const shop = await findShopByKey(req);
 
-  // Service-wide brake on guessing: past the miss budget, requests without a
-  // counter key wait. Scanning share codes then takes days per hit, and the
-  // worst an attacker achieves is a short pause for unpaired counters — not
-  // destroyed documents. Registered counters are never braked.
-  if (!shop && (await isLimited(MISS_KEY, config.verifyGlobalMissesPerMinute, 60 * 1000))) {
-    return NextResponse.json(BUSY, { status: 429 });
-  }
-  // Per share code, independent of IP: slows any attack focused on one target.
-  if (!(await rateLimit(`verify-code:${shareCode}`, config.verifyPerCodePerMinute, 60 * 1000))) {
-    return NextResponse.json(BUSY, { status: 429 });
-  }
-  const miss = async () => {
-    if (!shop) await rateLimit(MISS_KEY, Number.MAX_SAFE_INTEGER, 60 * 1000);
-    return fail();
-  };
-
   const candidate = await Session.findOne({
     shareCode,
     status: { $in: ["awaiting_otp", "awaiting_approval"] },
@@ -68,10 +63,31 @@ export async function POST(req: Request): Promise<NextResponse> {
   // A citizen who never answered the Allow prompt frees the session again.
   if (candidate) await resolveStaleApproval(candidate);
   const session = candidate?.status === "awaiting_otp" ? candidate : null;
-  if (!session) return miss();
 
+  // The one caller that gets specific answers and is never braked: a counter
+  // opening a session paired to IT. Holding *a* counter key isn't enough —
+  // anyone can register a counter.
+  const ownCounter = !!(shop && session?.shopId && shop._id.equals(session.shopId));
+
+  if (!ownCounter) {
+    // Service-wide brake on guessing, plus a budget per registered counter
+    // (so a self-registered counter can't scan freely), plus a per-code cap
+    // independent of IP. All answer identically whether the code exists.
+    const braked =
+      (await isLimited(MISS_KEY, config.verifyGlobalMissesPerMinute, 60 * 1000)) ||
+      (shop && (await isLimited(counterMissKey(shop._id), config.verifyPerCounterMissesPerMinute, 60 * 1000))) ||
+      !(await rateLimit(`verify-code:${shareCode}`, config.verifyPerCodePerMinute, 60 * 1000));
+    if (braked) return padded(NextResponse.json(BUSY, { status: 429 }));
+  }
+
+  const miss = async () => {
+    await rateLimit(MISS_KEY, Number.MAX_SAFE_INTEGER, 60 * 1000);
+    if (shop) await rateLimit(counterMissKey(shop._id), Number.MAX_SAFE_INTEGER, 60 * 1000);
+    return padded(fail());
+  };
+
+  if (!session) return miss();
   // A session paired with a counter opens only from that counter's device.
-  const ownCounter = !!(shop && session.shopId && shop._id.equals(session.shopId));
   if (session.shopId && !ownCounter) return miss();
 
   if (isExpired(session)) {
@@ -90,6 +106,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   if (!timingSafeEqualHex(hmacOtp(otp), session.otpHash)) {
+    // Counted before answering, so parallel guesses can't exceed the limit.
     session.otpAttempts += 1;
     await session.save();
     await logAudit(session._id as never, "otp_failed", ip, { attempt: session.otpAttempts });

@@ -1,6 +1,7 @@
 import { connectDb } from "@/lib/db";
 import { findOwnerSession } from "@/lib/shopAuth";
 import { getClientIp, rateLimit } from "@/lib/rateLimit";
+import { config } from "@/lib/config";
 import { ownerStatus } from "@/lib/sessionView";
 import { FINAL_STATUSES } from "@/models/Session";
 
@@ -22,7 +23,7 @@ const globalWithStreams = global as typeof globalThis & { _openStreams?: Map<str
 const openStreams = (globalWithStreams._openStreams ??= new Map<string, number>());
 
 export async function GET(req: Request): Promise<Response> {
-  if (!(await rateLimit(`status-stream:${getClientIp(req)}`, 30, 60 * 1000))) {
+  if (!(await rateLimit(`status-stream:${getClientIp(req)}`, config.limits.statusStreamPerIpMinute, 60 * 1000))) {
     return Response.json({ error: "Too many requests." }, { status: 429 });
   }
   await connectDb();

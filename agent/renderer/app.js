@@ -546,6 +546,7 @@ $("again-btn").addEventListener("click", () => {
       renderCounter();
       show("counter");
     } else {
+      if (counterInfo.notice) showError("setup-error", counterInfo.notice);
       show("setup");
     }
     return;

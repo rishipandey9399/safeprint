@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { connectDb } from "@/lib/db";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
+import { config } from "@/lib/config";
 import { Shop, shopLabel } from "@/models/Shop";
 
 export const runtime = "nodejs";
 
 /** Public: turns the shop code from a counter's QR into a name the citizen can confirm. */
 export async function GET(req: Request): Promise<NextResponse> {
-  if (!(await rateLimit(`shop-lookup:${getClientIp(req)}`, 30, 60 * 1000))) {
+  if (!(await rateLimit(`shop-lookup:${getClientIp(req)}`, config.limits.shopLookupPerIpMinute, 60 * 1000))) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   }
   const code = (new URL(req.url).searchParams.get("code") ?? "").toUpperCase().trim();
