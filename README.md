@@ -4,6 +4,10 @@ Let a citizen share a sensitive document (Aadhaar, PAN, marksheet, bank statemen
 neighborhood photocopy shop so the shop can **print it exactly once without ever being able to
 download, save, forward, or retain a copy**.
 
+**Docs:**
+- [How SafePrint works (walk-through with an example)](docs/HOW-IT-WORKS.md)
+- [Production readiness: what's done and what's still needed](docs/PRODUCTION-READINESS.md)
+
 ## The core loop
 
 The OTP works like a ride OTP in Rapido or Uber: it is generated fresh for every session, shown
