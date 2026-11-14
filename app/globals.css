@@ -1735,3 +1735,100 @@ html {
 .card > .status-line {
   margin-top: 16px;
 }
+
+/* =========================================================================
+   Post-print shredder (components/ShredderScene.tsx)
+   ========================================================================= */
+.shredder-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(120% 80% at 50% 38%, var(--sheet) 0%, var(--paper) 55%, #d9cba9 100%);
+  animation: shredder-in 0.35s ease-out both;
+}
+.shredder-stage {
+  flex: 1;
+  min-height: 0;
+}
+.shredder-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.shredder-caption {
+  padding: 0 16px calc(84px + env(safe-area-inset-bottom));
+  text-align: center;
+  font-family: var(--form);
+  color: var(--ink-soft);
+  min-height: 72px;
+}
+.shredder-caption p {
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+.shredder-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  border: 3px solid var(--ok);
+  border-radius: 6px;
+  color: var(--ok);
+  text-align: left;
+  transform: rotate(-3deg);
+  animation: stamp-land 0.42s cubic-bezier(0.2, 1.4, 0.5, 1) both;
+  background: rgba(251, 246, 234, 0.7);
+}
+.shredder-stamp strong {
+  display: block;
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.shredder-stamp small {
+  display: block;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+.shredder-stamp-mark {
+  font-size: 2rem;
+  line-height: 1;
+}
+.shredder-controls {
+  position: absolute;
+  right: 16px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 8px;
+}
+.shredder-btn {
+  font: 600 0.85rem var(--body);
+  padding: 9px 14px;
+  min-height: 40px;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+}
+.shredder-btn:hover {
+  background: #fff;
+}
+.shredder-btn:focus-visible {
+  outline: 2px solid var(--stamp-deep);
+  outline-offset: 2px;
+}
+@keyframes shredder-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shredder-overlay,
+  .shredder-stamp {
+    animation: none;
+  }
+}

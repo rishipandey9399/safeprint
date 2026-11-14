@@ -153,6 +153,10 @@ When Ramesh confirms the print, the file is gone:
 - **Crypto-shredding.** The encrypted file is deleted, and its key is blanked in the
   database. Even a stray copy of the encrypted file can never be decrypted again.
 - **File name scrubbed.** It becomes `[deleted]` straight away.
+- **The shredder moment.** On Ramesh's screen and Priya's phone, a 3D shredder pulls the page in
+  and drops the shreds into its bin, and a *Document destroyed* stamp lands. Ramesh sees a tiny,
+  blurred version of the page he printed, so he knows which one; Priya sees a generic page. It's
+  only a visual: the file was already gone from the server.
 - **Priya's phone** updates live: *Printed and deleted*.
 - **Retention.** The scrubbed session record is deleted after **30 days**, and the audit
   log entries after **90 days**.

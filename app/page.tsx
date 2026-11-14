@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import EditReview from "@/components/EditReview";
+import ShredderScene from "@/components/ShredderScene";
 
 interface ActiveSession {
   shareCode: string;
@@ -110,6 +111,15 @@ export default function UploadPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const status: Status = live?.status ?? "awaiting_otp";
+  // The shredder plays when this page watches the print happen, not when a
+  // reload finds the session already printed.
+  const lastStatusRef = useRef<Status | null>(null);
+  const [shredding, setShredding] = useState(false);
+  useEffect(() => {
+    const prev = lastStatusRef.current;
+    lastStatusRef.current = live ? status : prev;
+    if (status === "printed" && prev && prev !== "printed" && live) setShredding(true);
+  }, [status, live]);
 
   const lookupShop = useCallback(async (code: string) => {
     setShopError("");
@@ -396,6 +406,7 @@ export default function UploadPage() {
         </div>
       )}
 
+      {shredding && <ShredderScene onDone={() => setShredding(false)} />}
       {phase === "active" && session && (
         <div className="card">
           <span className="sheet-ref">SP·{session.shareCode}</span>

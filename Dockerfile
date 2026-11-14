@@ -27,6 +27,7 @@ ENV NODE_ENV=production \
 # and Next's cache are writable.
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 RUN mkdir -p /data/store .next/cache \
  && chown -R node:node /data .next/cache \
  && chmod 700 /data/store

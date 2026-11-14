@@ -34,6 +34,22 @@ The OTP works like a ride OTP in Rapido or Uber: it is generated fresh for every
    **permanently deleted** (blob removed + encryption keys blanked) and the citizen's screen
    updates live.
 
+### The shredder moment
+
+After a confirmed print, both the shop screen and the customer's phone play a short 3D scene: the
+page feeds into a SafePrint-branded shredder and drops onto the pile behind the bin window, then a
+**Document destroyed** stamp lands. It's decoration — the file is already deleted on the server.
+- The shop sees a 64 px, blurred copy of the page it just printed. That copy exists only in memory.
+  The phone never renders the document, so it shows a generic page.
+- Three.js (~370 KB) loads only when the scene starts. With *reduce motion* set or no WebGL, it
+  skips straight to the stamp. A **Skip** button is always there.
+- The sound is synthesised in the browser (no audio file) and has a mute toggle.
+- The model is built by a script, so it can be changed and rebuilt:
+  `pip install bpy && python assets/3d/build_shredder.py [--preview out_dir]`
+  (Blender 5.x as a Python module; `--preview` also renders Cycles stills). A shredder from a
+  designer works too: export it as `.glb` with the same node names (`BladeL`, `BladeR`, `LED`,
+  `SmokedGlass`/`BrushedAluminium` materials).
+
 ### Fixing a document at the counter
 
 A real shop fixes a badly aligned file before printing it. SafePrint lets the operator do the
@@ -340,6 +356,8 @@ components/ImageEditor.tsx    photo tools (Fabric.js): crop, perspective, cleanu
 components/WordEditor.tsx     embedded ONLYOFFICE editor (download/print/copy off)
 components/EditReview.tsx     citizen's preview of the edited version → Approve / Reject
 components/ShopCounter.tsx    counter QR + incoming jobs + OTP entry
+components/ShredderScene.tsx  post-print 3D shredder (Three.js, loaded only after a print)
+assets/3d/build_shredder.py   Blender script that builds public/models/shredder.glb
 lib/                    crypto, storage adapters, rate limit (Redis/memory), auth helpers,
                         lifecycle (OTP issue/approval/finalize), cleanup job
 models/                 Session, Shop, AuditLog Mongoose schemas

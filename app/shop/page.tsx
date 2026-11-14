@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import LockedViewer, { type VerifiedSession } from "@/components/LockedViewer";
 import RubberStamp from "@/components/RubberStamp";
+import ShredderScene from "@/components/ShredderScene";
 import ShopCounter, { type CounterIdentity } from "@/components/ShopCounter";
 
 type Phase = "loading" | "setup" | "counter" | "manual" | "waiting" | "viewer" | "done";
@@ -52,6 +53,8 @@ export default function ShopPortal() {
   const [session, setSession] = useState<VerifiedSession | null>(null);
   const [waitingFor, setWaitingFor] = useState<{ token: string; shopName: string | null; until: number } | null>(null);
   const [outcome, setOutcome] = useState<{ kind: "printed" | "ended"; message: string } | null>(null);
+  // Post-print shredder animation; cleared when it finishes or is skipped.
+  const [shred, setShred] = useState<{ thumbnail: HTMLCanvasElement | null } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const nameRef = useRef<HTMLInputElement>(null);
   const areaRef = useRef<HTMLInputElement>(null);
@@ -175,8 +178,9 @@ export default function ShopPortal() {
         <LockedViewer
           session={session}
           shareCode={shareCode}
-          onEnded={(kind, message) => {
+          onEnded={(kind, message, thumbnail) => {
             setOutcome({ kind, message });
+            if (kind === "printed") setShred({ thumbnail: thumbnail ?? null });
             setPhase("done");
           }}
         />
@@ -187,8 +191,22 @@ export default function ShopPortal() {
   if (phase === "done" && outcome) {
     return (
       <main className="page">
+        {shred && (
+          <ShredderScene
+            thumbnail={shred.thumbnail}
+            onDone={() => {
+              // Wipe the thumbnail like the viewer wipes its canvases.
+              if (shred.thumbnail) shred.thumbnail.width = 0;
+              setShred(null);
+            }}
+          />
+        )}
         <div className="card big-result">
-          <div className={`result-stamp stamp-land ${outcome.kind === "printed" ? "printed" : "ended"}`}>
+          <div
+            // Remount after the shredder so the stamp lands in view.
+            key={shred ? "behind-shredder" : "shown"}
+            className={`result-stamp stamp-land ${outcome.kind === "printed" ? "printed" : "ended"}`}
+          >
             <RubberStamp
               top={outcome.kind === "printed" ? "SAFEPRINT · TRUE COPY" : "SAFEPRINT"}
               bottom={outcome.kind === "printed" ? "COPY DESTROYED" : "SESSION CLOSED"}

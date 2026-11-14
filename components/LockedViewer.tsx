@@ -36,7 +36,8 @@ interface Props {
   session: VerifiedSession;
   /** Session share code — baked into the watermark so any copy is traceable. */
   shareCode: string;
-  onEnded: (outcome: "printed" | "ended", message: string) => void;
+  /** `thumbnail`: a tiny blurred image of page 1 for the shredder animation (printed only). */
+  onEnded: (outcome: "printed" | "ended", message: string, thumbnail?: HTMLCanvasElement | null) => void;
 }
 
 type EditStatus = "none" | "requested" | "editing" | "pending_review";
@@ -383,8 +384,9 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
       const res = await fetch("/api/confirm-print", { method: "POST", headers: auth });
       if (res.ok) {
         endedRef.current = true;
+        const thumb = shredThumbnail(composedRef.current[0]);
         wipeCanvases();
-        onEnded("printed", "Document printed. The file has been permanently deleted.");
+        onEnded("printed", "Document printed. The file has been permanently deleted.", thumb);
       } else {
         const data = await res.json().catch(() => ({}));
         setNotice(data.error ?? "Could not confirm print.");
@@ -827,4 +829,21 @@ export default function LockedViewer({ session, shareCode, onEnded }: Props) {
       )}
     </div>
   );
+}
+
+/**
+ * A 64px-wide, blurred copy of the page for the shredder animation: enough to
+ * recognise "that's my page" (layout, photo, colours), far too small to read.
+ * Lives only in memory until the animation ends.
+ */
+function shredThumbnail(src: HTMLCanvasElement | undefined): HTMLCanvasElement | null {
+  if (!src || !src.width || !src.height) return null;
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = Math.max(1, Math.round((64 * src.height) / src.width));
+  const g = c.getContext("2d", { willReadFrequently: true });
+  if (!g) return null;
+  g.filter = "blur(1.2px)";
+  g.drawImage(src, 0, 0, c.width, c.height);
+  return c;
 }
